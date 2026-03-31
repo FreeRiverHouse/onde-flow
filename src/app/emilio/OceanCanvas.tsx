@@ -1,13 +1,16 @@
 'use client';
 
+// === FILE: src/app/emilio/OceanCanvas.tsx ===
+// HoloCanvas — holographic dark void, VR-ready PerspectiveCamera
+
 import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrthographicCamera } from '@react-three/drei';
-import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-three/postprocessing';
-import { BlendFunction } from 'postprocessing';
-import OceanMesh from './components/OceanMesh';
-import SceneEnvironment from './components/SceneEnvironment';
-import EmilioCharacter from './components/EmilioCharacter';
+import { PerspectiveCamera } from '@react-three/drei';
+import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
+import dynamic from 'next/dynamic';
+
+const HoloEnvironment = dynamic(() => import('./components/SceneEnvironment'), { ssr: false });
+const HoloEmilio = dynamic(() => import('./components/EmilioCharacter'), { ssr: false });
 
 interface OceanCanvasProps {
   emotion: string;
@@ -22,23 +25,32 @@ export default function OceanCanvas({ emotion }: OceanCanvasProps) {
 
   return (
     <Canvas
-      style={{ width: '100%', height: '100%', background: '#02020c' }}
+      style={{ width: '100%', height: '100%', background: '#000008' }}
       gl={{ antialias: true, alpha: false }}
+      shadows={false}
     >
-      <fog attach="fog" args={['#ff6633', 8, 25]} />
-      <ambientLight intensity={0.4} color="#ff9966" />
-      <pointLight position={[-3, 3, 2]} intensity={1.2} color="#ffcc44" />
-      <pointLight position={[2, -1, 1]} intensity={0.3} color="#4488ff" />
-      <OrthographicCamera makeDefault zoom={90} position={[0, 1, 5]} />
-      <SceneEnvironment />
-      <OceanMesh />
+      {/* Deep space fog */}
+      <fog attach="fog" args={['#000008', 12, 40]} />
+
+      {/* Minimal ambient — neon lights do the work */}
+      <ambientLight intensity={0.08} color="#000020" />
+
+      {/* Neon point lights */}
+      <pointLight position={[-4, 3, 2]} intensity={2.0} color="#00f5ff" distance={20} decay={2} />
+      <pointLight position={[4, 1, -1]} intensity={1.5} color="#7c3aed" distance={18} decay={2} />
+      <pointLight position={[0, -2, 3]} intensity={1.0} color="#f59e0b" distance={12} decay={2} />
+
+      {/* VR-ready perspective camera */}
+      <PerspectiveCamera makeDefault fov={75} position={[0, 1.5, 5]} near={0.1} far={100} />
+
       <Suspense fallback={null}>
-        <EmilioCharacter emotion={safeEmotion} />
+        <HoloEnvironment />
+        <HoloEmilio emotion={safeEmotion} />
       </Suspense>
+
       <EffectComposer>
-        <Bloom luminanceThreshold={0.6} luminanceSmoothing={0.9} intensity={0.4} />
-        <Vignette eskil={false} offset={0.15} darkness={0.6} />
-        <ChromaticAberration blendFunction={BlendFunction.NORMAL} offset={[0.0005, 0.0005]} />
+        <Bloom luminanceThreshold={0.2} luminanceSmoothing={0.6} intensity={1.5} />
+        <Vignette eskil={false} offset={0.2} darkness={0.8} />
       </EffectComposer>
     </Canvas>
   );

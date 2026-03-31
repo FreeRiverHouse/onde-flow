@@ -2,7 +2,11 @@
 
 import { useRef, useState, useCallback } from 'react'
 
-// WAV encoder — ported from onde-vibe/App.tsx
+// === FILE: src/app/emilio/hooks/useVoiceInput.ts ===
+// Primary: Web Speech API (SpeechRecognition / webkitSpeechRecognition)
+// Fallback: Whisper via /api/stt — only on localhost (getUserMedia blocked on LAN non-HTTPS)
+
+// WAV encoder — kept as optional fallback for localhost
 function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   const numChannels = 1
   const sampleRate = audioBuffer.sampleRate
@@ -32,13 +36,127 @@ function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   return buffer
 }
 
+type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : never
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognitionInstance
+    webkitSpeechRecognition: new () => SpeechRecognitionInstance
+  }
+}
+
+interface SpeechRecognitionInstance {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  maxAlternatives: number
+  start(): void
+  stop(): void
+  abort(): void
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onend: (() => void) | null
+  onstart: (() => void) | null
+}
+
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList
+  resultIndex: number
+}
+
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+  [index: number]: SpeechRecognitionResult
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean
+  length: number
+  item(index: number): SpeechRecognitionAlternative
+  [index: number]: SpeechRecognitionAlternative
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string
+  confidence: number
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string
+  message: string
+}
+
+function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
+  if (typeof window === 'undefined') return null
+  if ('SpeechRecognition' in window) return window.SpeechRecognition
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ('webkitSpeechRecognition' in window) return (window as any).webkitSpeechRecognition
+  return null
+}
+
 export function useVoiceInput(onTranscript: (text: string) => void) {
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+
+  // --- Whisper fallback (localhost only) ---
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
 
-  const startRecording = useCallback(async () => {
+  const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost'
+
+  // --- PRIMARY: Web Speech API ---
+  const startWithWebSpeech = useCallback(() => {
+    const SpeechRecognitionCtor = getSpeechRecognition()
+    if (!SpeechRecognitionCtor) {
+      console.warn('[useVoiceInput] Web Speech API not available in this browser')
+      return false
+    }
+
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = 'it-IT'
+    recognition.continuous = false
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+
+    recognition.onstart = () => {
+      setIsRecording(true)
+    }
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          const transcript = event.results[i][0].transcript.trim()
+          if (transcript) {
+            onTranscript(transcript)
+          }
+        }
+      }
+    }
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error('[useVoiceInput] SpeechRecognition error:', event.error, event.message)
+      setIsRecording(false)
+    }
+
+    recognition.onend = () => {
+      setIsRecording(false)
+      recognitionRef.current = null
+    }
+
+    try {
+      recognition.start()
+      recognitionRef.current = recognition
+      return true
+    } catch (e) {
+      console.error('[useVoiceInput] Failed to start SpeechRecognition:', e)
+      return false
+    }
+  }, [onTranscript])
+
+  // --- FALLBACK: Whisper via MediaRecorder (localhost only) ---
+  const startWithWhisper = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' })
@@ -63,7 +181,7 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
             if (data.text?.trim()) onTranscript(data.text.trim())
           }
         } catch (e) {
-          console.error('[useVoiceInput] STT failed:', e)
+          console.error('[useVoiceInput] Whisper STT failed:', e)
         }
         setIsProcessing(false)
       }
@@ -71,18 +189,40 @@ export function useVoiceInput(onTranscript: (text: string) => void) {
       mediaRecorderRef.current = mr
       setIsRecording(true)
     } catch (e) {
-      console.error('[useVoiceInput] mic access failed:', e)
+      console.error('[useVoiceInput] mic access failed (Whisper fallback):', e)
     }
   }, [onTranscript])
 
+  const startRecording = useCallback(async () => {
+    // Try Web Speech API first (works on LAN without HTTPS)
+    const webSpeechStarted = startWithWebSpeech()
+    if (webSpeechStarted) return
+
+    // Fallback: Whisper only on localhost (getUserMedia blocked on LAN non-HTTPS)
+    if (isLocalhost) {
+      await startWithWhisper()
+    } else {
+      console.warn('[useVoiceInput] No speech input available: Web Speech API unsupported and not on localhost for Whisper fallback')
+    }
+  }, [startWithWebSpeech, startWithWhisper, isLocalhost])
+
   const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop()
-    mediaRecorderRef.current = null
+    // Stop Web Speech
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch {}
+      recognitionRef.current = null
+    }
+    // Stop Whisper fallback
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    setIsRecording(false)
   }, [])
 
   const toggleRecording = useCallback(() => {
     if (isRecording) stopRecording()
-    else startRecording()
+    else void startRecording()
   }, [isRecording, startRecording, stopRecording])
 
   return { isRecording, isProcessing, startRecording, stopRecording, toggleRecording }

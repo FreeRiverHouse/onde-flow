@@ -219,7 +219,6 @@ export default function EmilioPage() {
       void playTTS(emilioReply);
       if (data.action === 'start_coder' && data.coderPayload) {
         await fetch('/api/onde-flow/state', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ startCoder: data.coderPayload }) });
-        await fetch('/api/graph/run', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ objective: data.coderPayload.plan, gameId:'pgr', autonomous:false, maxIterations:1 }) });
         setOndeFlowMode('CODER_ACTIVE');
         setMessages(prev => [...prev, { role:'system', content:'⚡ Coder started — working...' }]);
       } else if (data.action === 'switch_app' && data.switchApp) {
@@ -253,33 +252,138 @@ export default function EmilioPage() {
   };
 
   if (startMode === null) {
+    // Generate star field deterministically to avoid SSR hydration mismatch
+    const STARS = Array.from({ length: 80 }, (_, i) => ({
+      left: ((i * 137.5) % 100).toFixed(2) + '%',
+      top:  ((i * 97.3)  % 100).toFixed(2) + '%',
+      size: (0.5 + (i % 4) * 0.4).toFixed(1) + 'px',
+      opacity: (0.2 + (i % 5) * 0.12).toFixed(2),
+    }));
+
     return (
-      <main style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', width:'100vw', height:'100vh', background:'#02020c', fontFamily:'monospace' }}>
-        <div style={{ color:'rgba(0,212,255,0.5)', fontSize:11, letterSpacing:4, marginBottom:8 }}>ONDE-FLOW // CREATIVE OS</div>
-        <div style={{ color:'#00d4ff', fontSize:22, letterSpacing:3, marginBottom:48, fontWeight:700 }}>SELECT MODE</div>
-        <div style={{ display:'flex', gap:24 }}>
-          <button
-            onClick={() => setStartMode('user')}
-            style={{ background:'rgba(0,212,255,0.05)', border:'1px solid #00d4ff', borderRadius:8, padding:'28px 40px', cursor:'pointer', color:'#00d4ff', fontFamily:'monospace', textAlign:'center', transition:'background 0.2s' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,212,255,0.12)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(0,212,255,0.05)')}
-          >
-            <div style={{ fontSize:32, marginBottom:12 }}>🎙</div>
-            <div style={{ fontSize:14, fontWeight:700, letterSpacing:2 }}>TALK TO EMILIO</div>
-            <div style={{ fontSize:10, marginTop:6, color:'rgba(0,212,255,0.5)' }}>I control the conversation</div>
-          </button>
-          <button
-            onClick={() => setStartMode('bot')}
-            style={{ background:'rgba(168,85,247,0.05)', border:'1px solid #a855f7', borderRadius:8, padding:'28px 40px', cursor:'pointer', color:'#a855f7', fontFamily:'monospace', textAlign:'center', transition:'background 0.2s' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(168,85,247,0.12)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(168,85,247,0.05)')}
-          >
-            <div style={{ fontSize:32, marginBottom:12 }}>🤖</div>
-            <div style={{ fontSize:14, fontWeight:700, letterSpacing:2 }}>WATCH THE BOT</div>
-            <div style={{ fontSize:10, marginTop:6, color:'rgba(168,85,247,0.5)' }}>Kimi talks to Emilio live</div>
-          </button>
-        </div>
-      </main>
+      <>
+        <style>{`
+          @keyframes glitch {
+            0%,100% { text-shadow: 0 0 8px #00f5ff, 0 0 20px #00f5ff; transform: none; }
+            20%      { text-shadow: -2px 0 #ff00aa, 2px 0 #00f5ff; transform: skewX(-1deg); }
+            40%      { text-shadow: 2px 0 #7c3aed, -2px 0 #00f5ff; transform: skewX(1deg); }
+            60%      { text-shadow: 0 0 8px #00f5ff, 0 0 20px #00f5ff; transform: none; }
+          }
+          @keyframes borderSpin {
+            0%   { border-color: rgba(0,245,255,0.2); box-shadow: 0 0 0 rgba(0,245,255,0); }
+            50%  { border-color: rgba(0,245,255,0.6); box-shadow: 0 0 18px rgba(0,245,255,0.2); }
+            100% { border-color: rgba(0,245,255,0.2); box-shadow: 0 0 0 rgba(0,245,255,0); }
+          }
+          @keyframes borderSpinPurple {
+            0%   { border-color: rgba(124,58,237,0.2); box-shadow: 0 0 0 rgba(124,58,237,0); }
+            50%  { border-color: rgba(124,58,237,0.6); box-shadow: 0 0 18px rgba(124,58,237,0.2); }
+            100% { border-color: rgba(124,58,237,0.2); box-shadow: 0 0 0 rgba(124,58,237,0); }
+          }
+          @keyframes blink {
+            0%,100% { opacity:1; } 50% { opacity:0; }
+          }
+          .boot-card-cyan:hover {
+            background: rgba(0,245,255,0.09) !important;
+            transform: translateY(-2px);
+          }
+          .boot-card-purple:hover {
+            background: rgba(124,58,237,0.09) !important;
+            transform: translateY(-2px);
+          }
+        `}</style>
+
+        <main style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          width: '100vw', height: '100vh',
+          background: '#000008',
+          fontFamily: "'JetBrains Mono','Fira Code','Courier New',monospace",
+          position: 'relative', overflow: 'hidden',
+        }}>
+          {/* Star field */}
+          {STARS.map((s, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              left: s.left, top: s.top,
+              width: s.size, height: s.size,
+              borderRadius: '50%',
+              background: '#ffffff',
+              opacity: Number(s.opacity),
+              pointerEvents: 'none',
+            }} />
+          ))}
+
+          {/* Title block */}
+          <div style={{ textAlign: 'center', marginBottom: 56, position: 'relative', zIndex: 1 }}>
+            <div style={{
+              color: '#00f5ff',
+              fontSize: 52,
+              fontWeight: 900,
+              letterSpacing: 12,
+              animation: 'glitch 5s ease-in-out infinite',
+              lineHeight: 1,
+              marginBottom: 12,
+            }}>
+              ONDE-FLOW
+            </div>
+            <div style={{ color: 'rgba(0,245,255,0.45)', fontSize: 10, letterSpacing: 5, marginBottom: 4 }}>
+              AI FACTORY SYSTEM v3.0
+            </div>
+            <div style={{ color: 'rgba(0,245,255,0.3)', fontSize: 10, letterSpacing: 4 }}>
+              INITIALIZING
+              <span style={{ animation: 'blink 1s step-start infinite' }}>_</span>
+            </div>
+          </div>
+
+          {/* Mode cards */}
+          <div style={{ display: 'flex', gap: 28, position: 'relative', zIndex: 1 }}>
+            {/* Card 1: Talk to Emilio — cyan */}
+            <button
+              onClick={() => setStartMode('user')}
+              className="boot-card-cyan"
+              style={{
+                background: 'rgba(0,245,255,0.04)',
+                border: '1px solid rgba(0,245,255,0.3)',
+                borderRadius: 6,
+                padding: '32px 44px',
+                cursor: 'pointer',
+                color: '#00f5ff',
+                fontFamily: 'inherit',
+                textAlign: 'center',
+                animation: 'borderSpin 3s ease-in-out infinite',
+                transition: 'background 0.2s, transform 0.2s',
+                outline: 'none',
+              }}
+            >
+              <div style={{ fontSize: 28, marginBottom: 14, letterSpacing: 2 }}>⬡</div>
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 3, marginBottom: 8 }}>TALK TO EMILIO</div>
+              <div style={{ fontSize: 9, color: 'rgba(0,245,255,0.45)', letterSpacing: 2 }}>DIRECT INTERFACE</div>
+            </button>
+
+            {/* Card 2: Watch the Bot — purple */}
+            <button
+              onClick={() => setStartMode('bot')}
+              className="boot-card-purple"
+              style={{
+                background: 'rgba(124,58,237,0.04)',
+                border: '1px solid rgba(124,58,237,0.3)',
+                borderRadius: 6,
+                padding: '32px 44px',
+                cursor: 'pointer',
+                color: '#7c3aed',
+                fontFamily: 'inherit',
+                textAlign: 'center',
+                animation: 'borderSpinPurple 3s ease-in-out infinite 1.5s',
+                transition: 'background 0.2s, transform 0.2s',
+                outline: 'none',
+              }}
+            >
+              <div style={{ fontSize: 28, marginBottom: 14, letterSpacing: 2 }}>◈</div>
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 3, marginBottom: 8 }}>WATCH THE BOT</div>
+              <div style={{ fontSize: 9, color: 'rgba(124,58,237,0.45)', letterSpacing: 2 }}>AUTONOMOUS MODE</div>
+            </button>
+          </div>
+        </main>
+      </>
     );
   }
 

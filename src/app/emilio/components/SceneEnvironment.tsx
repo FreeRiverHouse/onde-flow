@@ -1,279 +1,192 @@
 'use client';
 
-import { useRef, useMemo, useEffect } from 'react';
+// === FILE: src/app/emilio/components/SceneEnvironment.tsx ===
+// HoloEnvironment — holographic dark void scene elements
+
+import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-export default function SceneEnvironment() {
-  const skyGroupRef = useRef<THREE.Group>(null);
-  const islandGroupRef = useRef<THREE.Group>(null);
-  const lighthouseGroupRef = useRef<THREE.Group>(null);
-  const cloudsGroupRef = useRef<THREE.Group>(null);
-  const lightRef = useRef<THREE.PointLight>(null);
+// ─── Neon grid floor ──────────────────────────────────────────────────────────
+function NeonGrid() {
+  const gridRef = useRef<THREE.GridHelper>(null);
 
-  // Sky gradient shader
-  const skyUniforms = useMemo(() => ({
-    uTime: { value: 0 }
+  useFrame((state) => {
+    if (!gridRef.current) return;
+    // Slow pulse on grid opacity via color
+    const t = state.clock.elapsedTime;
+    const pulse = 0.3 + Math.sin(t * 0.5) * 0.1;
+    (gridRef.current.material as THREE.LineBasicMaterial).opacity = pulse;
+  });
+
+  return (
+    <gridHelper
+      ref={gridRef}
+      args={[80, 80, '#00f5ff', '#00f5ff']}
+      position={[0, -2.5, 0]}
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore material is LineBasicMaterial
+      material-transparent={true}
+      material-opacity={0.3}
+    />
+  );
+}
+
+// ─── Floating particle field ──────────────────────────────────────────────────
+function ParticleField() {
+  const pointsRef = useRef<THREE.Points>(null);
+
+  const { geometry, alphas } = useMemo(() => {
+    const count = 200;
+    const positions = new Float32Array(count * 3);
+    const alphasArr = new Float32Array(count);
+
+    for (let i = 0; i < count; i++) {
+      positions[i * 3 + 0] = (Math.random() - 0.5) * 30;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 15;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 20 - 5;
+      alphasArr[i] = Math.random();
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    return { geometry: geo, alphas: alphasArr };
+  }, []);
+
+  useFrame((state) => {
+    if (!pointsRef.current) return;
+    // Drift upward slowly, reset when too high
+    const posAttr = pointsRef.current.geometry.attributes.position as THREE.BufferAttribute;
+    const t = state.clock.elapsedTime;
+    for (let i = 0; i < posAttr.count; i++) {
+      posAttr.setY(i, posAttr.getY(i) + 0.003 * (0.5 + alphas[i] * 0.5));
+      if (posAttr.getY(i) > 8) {
+        posAttr.setY(i, -8);
+      }
+      // Subtle horizontal drift
+      posAttr.setX(i, posAttr.getX(i) + Math.sin(t * 0.2 + i) * 0.001);
+    }
+    posAttr.needsUpdate = true;
+  });
+
+  const material = useMemo(() => new THREE.PointsMaterial({
+    color: '#00f5ff',
+    size: 0.04,
+    transparent: true,
+    opacity: 0.6,
+    sizeAttenuation: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   }), []);
 
-  const skyVertexShader = `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  return <points ref={pointsRef} geometry={geometry} material={material} />;
+}
+
+// ─── Data columns (pulsing vertical cylinders) ────────────────────────────────
+function DataColumn({ position, color, phase }: { position: [number, number, number]; color: string; phase: number }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame((state) => {
+    if (!meshRef.current) return;
+    const t = state.clock.elapsedTime;
+    const pulse = 0.5 + Math.abs(Math.sin(t * 1.2 + phase)) * 0.5;
+    const mat = meshRef.current.material as THREE.MeshStandardMaterial;
+    mat.emissiveIntensity = pulse;
+  });
+
+  return (
+    <mesh ref={meshRef} position={position}>
+      <cylinderGeometry args={[0.04, 0.04, 8, 8]} />
+      <meshStandardMaterial
+        color={color}
+        emissive={color}
+        emissiveIntensity={0.8}
+        transparent
+        opacity={0.7}
+      />
+    </mesh>
+  );
+}
+
+// ─── Scan ring (descending loop) ──────────────────────────────────────────────
+function ScanRing() {
+  const ringRef = useRef<THREE.Mesh>(null);
+
+  useFrame((state) => {
+    if (!ringRef.current) return;
+    // Loop from y=6 down to y=-4, then reset
+    ringRef.current.position.y -= 0.012;
+    if (ringRef.current.position.y < -4) {
+      ringRef.current.position.y = 6;
     }
-  `;
+    // Rotate slowly
+    ringRef.current.rotation.z = state.clock.elapsedTime * 0.3;
+  });
 
-  const skyFragmentShader = `
-    uniform float uTime;
-    varying vec2 vUv;
-    void main() {
-      vec3 topColor = vec3(0.18, 0.08, 0.35);
-      vec3 midColor = vec3(0.78, 0.45, 0.22);
-      vec3 bottomColor = vec3(1.0, 0.97, 0.4);
-      vec3 color;
-      float y = vUv.y;
-      if (y > 0.5) {
-        color = mix(midColor, topColor, (y - 0.5) * 2.0);
-      } else {
-        color = mix(bottomColor, midColor, y * 2.0);
-      }
-      gl_FragColor = vec4(color, 1.0);
-    }
-  `;
+  return (
+    <mesh ref={ringRef} position={[0, 6, 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <torusGeometry args={[4, 0.02, 8, 64]} />
+      <meshStandardMaterial
+        color="#00f5ff"
+        emissive="#00f5ff"
+        emissiveIntensity={1.2}
+        transparent
+        opacity={0.5}
+      />
+    </mesh>
+  );
+}
 
-  // Stars geometry
-  const starsGeometry = useMemo(() => {
-    const geometry = new THREE.BufferGeometry();
-    const positions: number[] = [];
-    for (let i = 0; i < 12; i++) {
-      positions.push(
-        (Math.random() - 0.5) * 3,
-        0.6 + Math.random() * 0.3,
-        0
-      );
-    }
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    return geometry;
-  }, []);
+// ─── Ambient floating lights ──────────────────────────────────────────────────
+function AmbientGlows() {
+  const light1Ref = useRef<THREE.PointLight>(null);
+  const light2Ref = useRef<THREE.PointLight>(null);
+  const light3Ref = useRef<THREE.PointLight>(null);
 
-  // Island silhouette with custom shape
-  const islandShape = useMemo(() => {
-    const shape = new THREE.Shape();
-    shape.moveTo(-2.5, 0);
-    shape.bezierCurveTo(-2, 0.8, -1, 1.2, 0, 1.0);
-    shape.bezierCurveTo(1, 0.9, 2, 1.3, 2.5, 0.6);
-    shape.bezierCurveTo(2.2, 0.2, 1.5, 0, 0.5, -0.2);
-    shape.bezierCurveTo(-0.5, -0.3, -1.8, -0.1, -2.5, 0);
-    return shape;
-  }, []);
-
-  const islandGeometry = useMemo(() => {
-    return new THREE.ShapeGeometry(islandShape);
-  }, [islandShape]);
-
-  // Lighthouse geometries
-  const lighthouseBaseGeom = useMemo(() => new THREE.BoxGeometry(0.3, 0.4, 0.3), []);
-  const lighthouseMidGeom = useMemo(() => new THREE.BoxGeometry(0.22, 0.5, 0.22), []);
-  const lighthouseTopGeom = useMemo(() => new THREE.BoxGeometry(0.15, 0.3, 0.15), []);
-  const lighthouseRoomGeom = useMemo(() => new THREE.BoxGeometry(0.25, 0.2, 0.25), []);
-
-  // Cloud shapes
-  const cloudShapes = useMemo(() => {
-    return [
-      { x: -3, y: 2.8, z: -2, scale: 1.2, speed: 0.02 },
-      { x: 0, y: 3.2, z: -2.5, scale: 0.9, speed: 0.015 },
-      { x: 3, y: 2.5, z: -1.5, scale: 1.1, speed: 0.018 }
-    ];
-  }, []);
-
-  const Cloud = ({ x, y, z }: { x: number; y: number; z: number }) => {
-    const spheres = useMemo(() => [
-      { px: 0,     py: 0,    r: 0.12 },
-      { px: -0.14, py: -0.02, r: 0.09 },
-      { px:  0.15, py: -0.01, r: 0.10 },
-      { px: -0.07, py:  0.07, r: 0.08 },
-      { px:  0.08, py:  0.08, r: 0.07 },
-    ], []);
-    return (
-      <group position={[x, y, z]}>
-        {spheres.map((s, i) => (
-          <mesh key={i} position={[s.px, s.py, 0]}>
-            <sphereGeometry args={[s.r, 8, 6]} />
-            <meshToonMaterial color="#ffffff" transparent opacity={0.75} />
-          </mesh>
-        ))}
-      </group>
-    );
-  };
-
-  // Dock geometries
-  const plankGeometries = useMemo(() => {
-    const geoms: THREE.BoxGeometry[] = [];
-    for (let i = 0; i < 6; i++) {
-      geoms.push(new THREE.BoxGeometry(2.8, 0.04, 0.12));
-    }
-    return geoms;
-  }, []);
-
-  const postGeometries = useMemo(() => {
-    const geoms: THREE.CylinderGeometry[] = [];
-    for (let i = 0; i < 4; i++) {
-      geoms.push(new THREE.CylinderGeometry(0.04, 0.04, 0.8));
-    }
-    return geoms;
-  }, []);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      starsGeometry.dispose();
-      islandGeometry.dispose();
-      lighthouseBaseGeom.dispose();
-      lighthouseMidGeom.dispose();
-      lighthouseTopGeom.dispose();
-      lighthouseRoomGeom.dispose();
-      plankGeometries.forEach(g => g.dispose());
-      postGeometries.forEach(g => g.dispose());
-    };
-  }, [starsGeometry, islandGeometry, lighthouseBaseGeom, lighthouseMidGeom, lighthouseTopGeom, lighthouseRoomGeom, plankGeometries, postGeometries]);
-
-  // Animation
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    
-    // Parallax drift
-    if (skyGroupRef.current) {
-      skyGroupRef.current.position.x = Math.sin(t * 0.02) * 0.3;
+    if (light1Ref.current) {
+      light1Ref.current.position.x = Math.sin(t * 0.3) * 6;
+      light1Ref.current.position.z = Math.cos(t * 0.25) * 6 - 4;
     }
-    if (islandGroupRef.current) {
-      islandGroupRef.current.position.x = Math.sin(t * 0.03) * 0.5;
+    if (light2Ref.current) {
+      light2Ref.current.position.x = Math.cos(t * 0.2) * 5;
+      light2Ref.current.position.z = Math.sin(t * 0.35) * 5 - 4;
     }
-    if (lighthouseGroupRef.current) {
-      lighthouseGroupRef.current.position.x = Math.sin(t * 0.04) * 0.7;
-    }
-    if (cloudsGroupRef.current) {
-      cloudsGroupRef.current.children.forEach((child, i) => {
-        child.position.x = cloudShapes[i].x + Math.sin(t * cloudShapes[i].speed) * 0.3;
-      });
-    }
-
-    // Lighthouse light oscillation
-    if (lightRef.current) {
-      lightRef.current.intensity = 0.8 + Math.sin(t * 1.5) * 0.3;
+    if (light3Ref.current) {
+      light3Ref.current.position.y = 1 + Math.sin(t * 0.4) * 2;
     }
   });
 
   return (
     <>
-      {/* Layer 1: Sky background with stars */}
-      <group ref={skyGroupRef} position={[0, 1.5, -8]}>
-        <mesh>
-          <planeGeometry args={[20, 12]} />
-          <shaderMaterial
-            vertexShader={skyVertexShader}
-            fragmentShader={skyFragmentShader}
-            uniforms={skyUniforms}
-          />
-        </mesh>
-        {/* Stars */}
-        {Array.from({ length: 10 }).map((_, i) => (
-          <mesh
-            key={i}
-            position={[
-              (Math.random() - 0.5) * 8,
-              4 + Math.random() * 1.5,
-              0.1
-            ]}
-          >
-            <circleGeometry args={[0.015 + Math.random() * 0.02, 8]} />
-            <meshBasicMaterial color="#ffffff" transparent opacity={0.7 + Math.random() * 0.3} />
-          </mesh>
-        ))}
-      </group>
+      <pointLight ref={light1Ref} position={[6, 0, -4]} color="#00f5ff" intensity={1.5} distance={15} decay={2} />
+      <pointLight ref={light2Ref} position={[-5, 0, -4]} color="#7c3aed" intensity={1.2} distance={14} decay={2} />
+      <pointLight ref={light3Ref} position={[0, 1, 0]} color="#f59e0b" intensity={0.6} distance={10} decay={2} />
+    </>
+  );
+}
 
-      {/* Layer 2: Island silhouette */}
-      <group ref={islandGroupRef} position={[0, -1.5, -5]}>
-        <mesh geometry={islandGeometry} position={[0, 0, 0]} rotation={[0, 0, 0]}>
-          <meshBasicMaterial color="#0d0a1a" />
-        </mesh>
-      </group>
+// ─── Main export ──────────────────────────────────────────────────────────────
+export default function SceneEnvironment() {
+  const columnConfigs: Array<{ position: [number, number, number]; color: string; phase: number }> = [
+    { position: [-6, -1, -8],  color: '#00f5ff', phase: 0 },
+    { position: [-3, -1, -10], color: '#7c3aed', phase: 1.2 },
+    { position: [3,  -1, -10], color: '#00f5ff', phase: 2.4 },
+    { position: [6,  -1, -8],  color: '#7c3aed', phase: 0.6 },
+    { position: [-8, -1, -6],  color: '#f59e0b', phase: 1.8 },
+    { position: [8,  -1, -6],  color: '#f59e0b', phase: 3.0 },
+  ];
 
-      {/* Layer 3: Lighthouse */}
-      <group ref={lighthouseGroupRef} position={[1.5, -0.8, -3]}>
-        {/* Base */}
-        <mesh geometry={lighthouseBaseGeom} position={[0, 0.2, 0]}>
-          <meshBasicMaterial color="#e8e0d8" />
-        </mesh>
-        {/* Middle */}
-        <mesh geometry={lighthouseMidGeom} position={[0, 0.65, 0]}>
-          <meshBasicMaterial color="#f5f0eb" />
-        </mesh>
-        {/* Top */}
-        <mesh geometry={lighthouseTopGeom} position={[0, 1.15, 0]}>
-          <meshBasicMaterial color="#ffffff" />
-        </mesh>
-        {/* Light room */}
-        <mesh geometry={lighthouseRoomGeom} position={[0, 1.45, 0]}>
-          <meshBasicMaterial color="#ffdd88" transparent opacity={0.9} />
-        </mesh>
-        {/* Light point */}
-        <pointLight
-          ref={lightRef}
-          position={[0, 1.5, 0.2]}
-          color="#ffdd88"
-          intensity={1.1}
-          distance={15}
-          decay={2}
-        />
-      </group>
-
-      {/* Layer 4: Detailed dock */}
-      <group position={[0.4, -0.35, -1]}>
-        {/* Planks */}
-        {plankGeometries.map((geom, i) => (
-          <mesh key={i} geometry={geom} position={[0, i * 0.11, 0]}>
-            <meshStandardMaterial color="#5a4030" />
-          </mesh>
-        ))}
-        {/* Side edges */}
-        <mesh position={[-1.45, 0.33, 0]}>
-          <boxGeometry args={[0.08, 0.72, 0.15]} />
-          <meshStandardMaterial color="#4a3528" />
-        </mesh>
-        <mesh position={[1.45, 0.33, 0]}>
-          <boxGeometry args={[0.08, 0.72, 0.15]} />
-          <meshStandardMaterial color="#4a3528" />
-        </mesh>
-        {/* Posts */}
-        {postGeometries.map((geom, i) => {
-          const x = i < 2 ? -1.4 : 1.4;
-          const z = i % 2 === 0 ? -0.3 : 0.3;
-          return (
-            <mesh key={i} geometry={geom} position={[x, 0, z]}>
-              <meshStandardMaterial color="#3d2a1a" />
-            </mesh>
-          );
-        })}
-      </group>
-
-      {/* Sun */}
-      <mesh position={[-2.5, 1.8, -7]}>
-        <sphereGeometry args={[0.35, 16, 16]} />
-        <meshBasicMaterial color="#FFD166" />
-      </mesh>
-      <pointLight position={[-2.5, 1.8, -5]} color="#FF9944" intensity={1.5} />
-
-      {/* Clouds layer */}
-      <group ref={cloudsGroupRef}>
-        {cloudShapes.map((cloud, i) => (
-          <Cloud key={i} x={cloud.x} y={cloud.y} z={cloud.z} />
-        ))}
-      </group>
-
-      {/* Ambient lighting */}
-      <ambientLight intensity={0.5} color="#4a3060" />
-      <directionalLight position={[3, 5, 2]} intensity={1.2} color="#fff4e0" />
+  return (
+    <>
+      <NeonGrid />
+      <ParticleField />
+      {columnConfigs.map((cfg, i) => (
+        <DataColumn key={i} position={cfg.position} color={cfg.color} phase={cfg.phase} />
+      ))}
+      <ScanRing />
+      <AmbientGlows />
     </>
   );
 }
