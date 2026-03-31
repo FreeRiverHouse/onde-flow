@@ -53,8 +53,10 @@ export default function EmilioPage() {
   }, [startMode]);
 
   const { enabled, toggle: toggleAudio } = useOceanAudio();
-  const { isRecording: isVoiceRecording, isProcessing: isVoiceProcessing, toggleRecording } = useVoiceInput(
-    (text) => { void sendToEmilio(text); }
+
+  const { isListening, interimText, isRecording: isVoiceRecording, isProcessing: isVoiceProcessing, toggleRecording } = useVoiceInput(
+    (text) => { void sendToEmilio(text) },
+    { autoStart: startMode === 'user', paused: isLoading }
   );
 
   const speakFallback = (text: string): Promise<void> => {
@@ -428,6 +430,8 @@ export default function EmilioPage() {
         isVoiceRecording={isVoiceRecording}
         isVoiceProcessing={isVoiceProcessing}
         onToggleVoice={toggleRecording}
+        isListening={isListening}
+        interimText={interimText}
       />
     </main>
   );

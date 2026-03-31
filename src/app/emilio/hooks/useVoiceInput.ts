@@ -1,42 +1,10 @@
 'use client'
 
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 
 // === FILE: src/app/emilio/hooks/useVoiceInput.ts ===
-// Primary: Web Speech API (SpeechRecognition / webkitSpeechRecognition)
-// Fallback: Whisper via /api/stt — only on localhost (getUserMedia blocked on LAN non-HTTPS)
-
-// WAV encoder — kept as optional fallback for localhost
-function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
-  const numChannels = 1
-  const sampleRate = audioBuffer.sampleRate
-  const left = audioBuffer.getChannelData(0)
-  let channelData = left
-  if (audioBuffer.numberOfChannels > 1) {
-    const right = audioBuffer.getChannelData(1)
-    channelData = new Float32Array(left.length)
-    for (let i = 0; i < left.length; i++) channelData[i] = (left[i] + right[i]) / 2
-  }
-  const length = channelData.length * 2
-  const buffer = new ArrayBuffer(44 + length)
-  const view = new DataView(buffer)
-  const ws = (off: number, str: string) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)) }
-  ws(0, 'RIFF'); view.setUint32(4, 36 + length, true)
-  ws(8, 'WAVE'); ws(12, 'fmt ')
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true)
-  view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * numChannels * 2, true)
-  view.setUint16(32, numChannels * 2, true); view.setUint16(34, 16, true)
-  ws(36, 'data'); view.setUint32(40, length, true)
-  let offset = 44
-  for (let i = 0; i < channelData.length; i++, offset += 2) {
-    const s = Math.max(-1, Math.min(1, channelData[i]))
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-  }
-  return buffer
-}
-
-type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : never
+// Always-on voice input using Web Speech API.
+// Auto-restarts after each utterance unless paused or unmounted.
 
 declare global {
   interface Window {
@@ -95,135 +63,184 @@ function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
   return null
 }
 
-export function useVoiceInput(onTranscript: (text: string) => void) {
-  const [isRecording, setIsRecording] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false)
+interface UseVoiceInputOptions {
+  autoStart?: boolean
+  paused?: boolean
+  lang?: string
+}
+
+export function useVoiceInput(
+  onTranscript: (text: string) => void,
+  options?: UseVoiceInputOptions
+) {
+  const { autoStart = true, paused = false, lang = 'it-IT' } = options ?? {}
+
+  const [isListening, setIsListening] = useState(false)
+  const [interimText, setInterimText] = useState('')
+
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  const unmountedRef = useRef(false)
+  const pausedRef = useRef(paused)
+  const permanentStopRef = useRef(false)
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const onTranscriptRef = useRef(onTranscript)
 
-  // --- Whisper fallback (localhost only) ---
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
+  // Keep refs in sync with latest values
+  useEffect(() => { pausedRef.current = paused }, [paused])
+  useEffect(() => { onTranscriptRef.current = onTranscript }, [onTranscript])
 
-  const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-
-  // --- PRIMARY: Web Speech API ---
-  const startWithWebSpeech = useCallback(() => {
+  const createAndStart = useCallback(() => {
     const SpeechRecognitionCtor = getSpeechRecognition()
     if (!SpeechRecognitionCtor) {
-      console.warn('[useVoiceInput] Web Speech API not available in this browser')
-      return false
+      console.warn('[useVoiceInput] Web Speech API not available')
+      return
     }
+    if (unmountedRef.current || permanentStopRef.current) return
 
     const recognition = new SpeechRecognitionCtor()
-    recognition.lang = 'it-IT'
+    recognition.lang = lang
     recognition.continuous = false
-    recognition.interimResults = false
+    recognition.interimResults = true
     recognition.maxAlternatives = 1
 
     recognition.onstart = () => {
-      setIsRecording(true)
+      setIsListening(true)
     }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          const transcript = event.results[i][0].transcript.trim()
+        const result = event.results[i]
+        if (result.isFinal) {
+          const transcript = result[0].transcript.trim()
           if (transcript) {
-            onTranscript(transcript)
+            onTranscriptRef.current(transcript)
+            setInterimText('')
           }
+        } else {
+          interim += result[0].transcript
         }
       }
+      if (interim) setInterimText(interim)
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      if (event.error === 'no-speech') {
+        // Silently restart — no speech detected in this segment
+        return
+      }
       console.error('[useVoiceInput] SpeechRecognition error:', event.error, event.message)
-      setIsRecording(false)
     }
 
     recognition.onend = () => {
-      setIsRecording(false)
+      setIsListening(false)
+      setInterimText('')
       recognitionRef.current = null
+
+      if (unmountedRef.current || permanentStopRef.current) return
+      if (pausedRef.current) return
+
+      // Auto-restart after 300ms
+      restartTimerRef.current = setTimeout(() => {
+        if (!unmountedRef.current && !permanentStopRef.current && !pausedRef.current) {
+          createAndStart()
+        }
+      }, 300)
     }
 
     try {
       recognition.start()
       recognitionRef.current = recognition
-      return true
     } catch (e) {
       console.error('[useVoiceInput] Failed to start SpeechRecognition:', e)
-      return false
     }
-  }, [onTranscript])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang])
 
-  // --- FALLBACK: Whisper via MediaRecorder (localhost only) ---
-  const startWithWhisper = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' })
-      chunksRef.current = []
-      mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
-      mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop())
-        setIsRecording(false)
-        setIsProcessing(true)
-        try {
-          const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-          const arrayBuf = await blob.arrayBuffer()
-          const audioCtx = new AudioContext()
-          const decoded = await audioCtx.decodeAudioData(arrayBuf)
-          audioCtx.close()
-          const wav = encodeWAV(decoded)
-          const formData = new FormData()
-          formData.append('audio', new Blob([wav], { type: 'audio/wav' }), 'recording.wav')
-          const res = await fetch('/api/stt', { method: 'POST', body: formData })
-          if (res.ok) {
-            const data = await res.json() as { text: string }
-            if (data.text?.trim()) onTranscript(data.text.trim())
-          }
-        } catch (e) {
-          console.error('[useVoiceInput] Whisper STT failed:', e)
-        }
-        setIsProcessing(false)
+  // Handle paused changes: abort when paused, restart when unpaused
+  useEffect(() => {
+    if (paused) {
+      // Cancel any pending restart
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current)
+        restartTimerRef.current = null
       }
-      mr.start(100)
-      mediaRecorderRef.current = mr
-      setIsRecording(true)
-    } catch (e) {
-      console.error('[useVoiceInput] mic access failed (Whisper fallback):', e)
-    }
-  }, [onTranscript])
-
-  const startRecording = useCallback(async () => {
-    // Try Web Speech API first (works on LAN without HTTPS)
-    const webSpeechStarted = startWithWebSpeech()
-    if (webSpeechStarted) return
-
-    // Fallback: Whisper only on localhost (getUserMedia blocked on LAN non-HTTPS)
-    if (isLocalhost) {
-      await startWithWhisper()
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort() } catch {}
+        recognitionRef.current = null
+      }
+      setIsListening(false)
+      setInterimText('')
     } else {
-      console.warn('[useVoiceInput] No speech input available: Web Speech API unsupported and not on localhost for Whisper fallback')
+      // Resume: start if not permanently stopped
+      if (!permanentStopRef.current && !unmountedRef.current) {
+        createAndStart()
+      }
     }
-  }, [startWithWebSpeech, startWithWhisper, isLocalhost])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused])
 
-  const stopRecording = useCallback(() => {
-    // Stop Web Speech
+  // Auto-start on mount
+  useEffect(() => {
+    unmountedRef.current = false
+    permanentStopRef.current = false
+
+    if (autoStart && !paused) {
+      createAndStart()
+    }
+
+    return () => {
+      unmountedRef.current = true
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort() } catch {}
+        recognitionRef.current = null
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // intentionally run once on mount
+
+  const stop = useCallback(() => {
+    permanentStopRef.current = true
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current)
+      restartTimerRef.current = null
+    }
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch {}
+      try { recognitionRef.current.abort() } catch {}
       recognitionRef.current = null
     }
-    // Stop Whisper fallback
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop()
-      mediaRecorderRef.current = null
-    }
-    setIsRecording(false)
+    setIsListening(false)
+    setInterimText('')
   }, [])
 
-  const toggleRecording = useCallback(() => {
-    if (isRecording) stopRecording()
-    else void startRecording()
-  }, [isRecording, startRecording, stopRecording])
+  const restart = useCallback(() => {
+    permanentStopRef.current = false
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current)
+      restartTimerRef.current = null
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort() } catch {}
+      recognitionRef.current = null
+    }
+    createAndStart()
+  }, [createAndStart])
 
-  return { isRecording, isProcessing, startRecording, stopRecording, toggleRecording }
+  // Compatibility: isRecording = isListening, toggleRecording = stop/restart toggle
+  const toggleRecording = useCallback(() => {
+    if (isListening) stop()
+    else restart()
+  }, [isListening, stop, restart])
+
+  return {
+    isListening,
+    interimText,
+    isProcessing: false,  // always false — compatibility
+    stop,
+    restart,
+    // Compatibility aliases for ChatPanel
+    isRecording: isListening,
+    toggleRecording,
+  }
 }

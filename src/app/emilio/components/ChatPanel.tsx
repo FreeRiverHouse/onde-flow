@@ -35,6 +35,10 @@ const GLOBAL_STYLES = `
     0%, 100% { box-shadow: 0 0 0 0 rgba(0,245,255,0.4); }
     50%       { box-shadow: 0 0 0 6px rgba(0,245,255,0); }
   }
+  @keyframes listeningPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,159,0.5); }
+    50%       { opacity: 0.7; box-shadow: 0 0 0 5px rgba(0,255,159,0); }
+  }
   @keyframes borderGlow {
     0%, 100% { border-color: rgba(0,245,255,0.15); }
     50%       { border-color: rgba(0,245,255,0.4); }
@@ -68,6 +72,8 @@ interface ChatPanelProps {
   isVoiceRecording?: boolean
   isVoiceProcessing?: boolean
   onToggleVoice?: () => void
+  isListening?: boolean
+  interimText?: string
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -137,6 +143,8 @@ export default function ChatPanel({
   isVoiceRecording = false,
   isVoiceProcessing = false,
   onToggleVoice,
+  isListening = false,
+  interimText = '',
 }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -201,6 +209,30 @@ export default function ChatPanel({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {/* LISTENING indicator */}
+              {isListening && (
+                <span style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  color: C.green,
+                  fontSize: 9,
+                  letterSpacing: 2,
+                  fontFamily: C.font,
+                  animation: 'listeningPulse 1.4s ease-in-out infinite',
+                }}>
+                  <span style={{
+                    display: 'inline-block',
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: C.green,
+                    boxShadow: `0 0 6px ${C.green}`,
+                  }} />
+                  LISTENING
+                </span>
+              )}
+
               {/* GP button */}
               <button
                 onClick={isGPRunning ? onStopGP : onRunGP}
@@ -362,6 +394,24 @@ export default function ChatPanel({
           borderTop: `1px solid ${C.borderCyan}`,
           background: 'rgba(0,245,255,0.015)',
         }}>
+          {/* Interim text (what the user is saying right now) */}
+          {interimText && (
+            <div style={{
+              marginBottom: 6,
+              fontSize: 11,
+              fontStyle: 'italic',
+              color: 'rgba(0,245,255,0.6)',
+              fontFamily: C.font,
+              letterSpacing: 0.5,
+              paddingLeft: 2,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              〜 &quot;{interimText}&quot;
+            </div>
+          )}
+
           <form onSubmit={onSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {/* Mic button */}
             {onToggleVoice && (
@@ -400,11 +450,11 @@ export default function ChatPanel({
               value={inputValue}
               onChange={e => onInputChange(e.target.value)}
               placeholder={
-                isVoiceRecording
-                  ? '● listening...'
+                isListening
+                  ? 'listening...'
                   : isVoiceProcessing
-                    ? '◌ processing...'
-                    : 'speak or type...'
+                    ? 'thinking...'
+                    : 'type or speak...'
               }
               disabled={isLoading}
               style={{
