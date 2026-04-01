@@ -43,7 +43,7 @@ export default function EmilioPage() {
   const gpAbortRef = useRef(false);
   const currentAudioRef = useRef<AudioBufferSourceNode | null>(null);
   const currentAudioCtxRef = useRef<AudioContext | null>(null);
-  const [startMode, setStartMode] = useState<'user' | 'bot' | null>(null);
+  const [startMode, setStartMode] = useState<'user' | 'bot' | null>('user');
 
   useEffect(() => {
     if (startMode === 'bot') {
@@ -393,7 +393,7 @@ export default function EmilioPage() {
   }
 
   return (
-    <main style={{ display:'flex', width:'100vw', height:'100vh', overflow:'hidden', background:'#02020c' }}>
+    <main style={{ display:'flex', width:'100%', height:'100vh', overflow:'hidden', background:'#02020c' }}>
       <div style={{ position:'relative', width:'60%', height:'100%' }}>
         <OceanCanvas emotion={lastEmotion} />
         <SpeechBubble
