@@ -3,8 +3,9 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 
 // === FILE: src/app/emilio/hooks/useVoiceInput.ts ===
-// Always-on voice input using Web Speech API.
-// Auto-restarts after each utterance unless paused or unmounted.
+// Voice input using Web Speech API.
+// Must be started via startListening() inside a user gesture (click handler).
+// Auto-restarts after each utterance unless paused or stopListening() was called.
 
 declare global {
   interface Window {
@@ -64,7 +65,7 @@ function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
 }
 
 interface UseVoiceInputOptions {
-  autoStart?: boolean
+  autoRestart?: boolean
   paused?: boolean
   lang?: string
 }
@@ -73,7 +74,7 @@ export function useVoiceInput(
   onTranscript: (text: string) => void,
   options?: UseVoiceInputOptions
 ) {
-  const { autoStart = true, paused = false, lang = 'it-IT' } = options ?? {}
+  const { autoRestart = true, paused = false, lang = 'it-IT' } = options ?? {}
 
   const [isListening, setIsListening] = useState(false)
   const [interimText, setInterimText] = useState('')
@@ -81,7 +82,7 @@ export function useVoiceInput(
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const unmountedRef = useRef(false)
   const pausedRef = useRef(paused)
-  const permanentStopRef = useRef(false)
+  const hasStartedRef = useRef(false)
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onTranscriptRef = useRef(onTranscript)
 
@@ -95,7 +96,7 @@ export function useVoiceInput(
       console.warn('[useVoiceInput] Web Speech API not available')
       return
     }
-    if (unmountedRef.current || permanentStopRef.current) return
+    if (unmountedRef.current || !hasStartedRef.current) return
 
     const recognition = new SpeechRecognitionCtor()
     recognition.lang = lang
@@ -137,12 +138,14 @@ export function useVoiceInput(
       setInterimText('')
       recognitionRef.current = null
 
-      if (unmountedRef.current || permanentStopRef.current) return
+      if (unmountedRef.current) return
+      if (!hasStartedRef.current) return
       if (pausedRef.current) return
+      if (!autoRestart) return
 
       // Auto-restart after 300ms
       restartTimerRef.current = setTimeout(() => {
-        if (!unmountedRef.current && !permanentStopRef.current && !pausedRef.current) {
+        if (!unmountedRef.current && hasStartedRef.current && !pausedRef.current) {
           createAndStart()
         }
       }, 300)
@@ -155,9 +158,9 @@ export function useVoiceInput(
       console.error('[useVoiceInput] Failed to start SpeechRecognition:', e)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang])
+  }, [lang, autoRestart])
 
-  // Handle paused changes: abort when paused, restart when unpaused
+  // Handle paused changes: abort when paused, restart when unpaused (if hasStarted)
   useEffect(() => {
     if (paused) {
       // Cancel any pending restart
@@ -172,23 +175,17 @@ export function useVoiceInput(
       setIsListening(false)
       setInterimText('')
     } else {
-      // Resume: start if not permanently stopped
-      if (!permanentStopRef.current && !unmountedRef.current) {
+      // Resume: restart only if hasStarted
+      if (hasStartedRef.current && !unmountedRef.current) {
         createAndStart()
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused])
 
-  // Auto-start on mount
+  // Cleanup on unmount
   useEffect(() => {
     unmountedRef.current = false
-    permanentStopRef.current = false
-
-    if (autoStart && !paused) {
-      createAndStart()
-    }
-
     return () => {
       unmountedRef.current = true
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
@@ -198,10 +195,25 @@ export function useVoiceInput(
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // intentionally run once on mount
+  }, [])
 
-  const stop = useCallback(() => {
-    permanentStopRef.current = true
+  // startListening: must be called inside a user gesture (click handler)
+  const startListening = useCallback(() => {
+    hasStartedRef.current = true
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current)
+      restartTimerRef.current = null
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort() } catch {}
+      recognitionRef.current = null
+    }
+    createAndStart()
+  }, [createAndStart])
+
+  // stopListening: permanently stops until startListening() is called again
+  const stopListening = useCallback(() => {
+    hasStartedRef.current = false
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current)
       restartTimerRef.current = null
@@ -214,31 +226,18 @@ export function useVoiceInput(
     setInterimText('')
   }, [])
 
-  const restart = useCallback(() => {
-    permanentStopRef.current = false
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current)
-      restartTimerRef.current = null
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort() } catch {}
-      recognitionRef.current = null
-    }
-    createAndStart()
-  }, [createAndStart])
-
-  // Compatibility: isRecording = isListening, toggleRecording = stop/restart toggle
+  // toggleRecording: compatibility alias
   const toggleRecording = useCallback(() => {
-    if (isListening) stop()
-    else restart()
-  }, [isListening, stop, restart])
+    if (isListening || hasStartedRef.current) stopListening()
+    else startListening()
+  }, [isListening, stopListening, startListening])
 
   return {
     isListening,
     interimText,
     isProcessing: false,  // always false — compatibility
-    stop,
-    restart,
+    startListening,
+    stopListening,
     // Compatibility aliases for ChatPanel
     isRecording: isListening,
     toggleRecording,

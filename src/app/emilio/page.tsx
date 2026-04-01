@@ -54,9 +54,9 @@ export default function EmilioPage() {
 
   const { enabled, toggle: toggleAudio } = useOceanAudio();
 
-  const { isListening, interimText, isRecording: isVoiceRecording, isProcessing: isVoiceProcessing, toggleRecording } = useVoiceInput(
+  const { isListening, interimText, isRecording: isVoiceRecording, isProcessing: isVoiceProcessing, startListening, stopListening } = useVoiceInput(
     (text) => { void sendToEmilio(text) },
-    { autoStart: startMode === 'user', paused: isLoading }
+    { paused: isLoading }
   );
 
   const speakFallback = (text: string): Promise<void> => {
@@ -340,7 +340,10 @@ export default function EmilioPage() {
           <div style={{ display: 'flex', gap: 28, position: 'relative', zIndex: 1 }}>
             {/* Card 1: Talk to Emilio — cyan */}
             <button
-              onClick={() => setStartMode('user')}
+              onClick={() => {
+                startListening()  // user gesture — Chrome lo accetta
+                setStartMode('user')
+              }}
               className="boot-card-cyan"
               style={{
                 background: 'rgba(0,245,255,0.04)',
@@ -429,7 +432,7 @@ export default function EmilioPage() {
         onStopGP={stopGPTest}
         isVoiceRecording={isVoiceRecording}
         isVoiceProcessing={isVoiceProcessing}
-        onToggleVoice={toggleRecording}
+        onToggleVoice={() => isListening ? stopListening() : startListening()}
         isListening={isListening}
         interimText={interimText}
       />
