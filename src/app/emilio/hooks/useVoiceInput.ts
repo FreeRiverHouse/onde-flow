@@ -1,245 +1,113 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback } from 'react'
 
-// === FILE: src/app/emilio/hooks/useVoiceInput.ts ===
-// Voice input using Web Speech API.
-// Must be started via startListening() inside a user gesture (click handler).
-// Auto-restarts after each utterance unless paused or stopListening() was called.
-
-declare global {
-  interface Window {
-    SpeechRecognition: new () => SpeechRecognitionInstance
-    webkitSpeechRecognition: new () => SpeechRecognitionInstance
+// WAV encoder
+function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
+  const numChannels = 1
+  const sampleRate = audioBuffer.sampleRate
+  const left = audioBuffer.getChannelData(0)
+  let channelData = left
+  if (audioBuffer.numberOfChannels > 1) {
+    const right = audioBuffer.getChannelData(1)
+    channelData = new Float32Array(left.length)
+    for (let i = 0; i < left.length; i++) channelData[i] = (left[i] + right[i]) / 2
   }
+  const length = channelData.length * 2
+  const buffer = new ArrayBuffer(44 + length)
+  const view = new DataView(buffer)
+  const ws = (off: number, str: string) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)) }
+  ws(0, 'RIFF'); view.setUint32(4, 36 + length, true)
+  ws(8, 'WAVE'); ws(12, 'fmt ')
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true)
+  view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * numChannels * 2, true)
+  view.setUint16(32, numChannels * 2, true); view.setUint16(34, 16, true)
+  ws(36, 'data'); view.setUint32(40, length, true)
+  let offset = 44
+  for (let i = 0; i < channelData.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, channelData[i]))
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  return buffer
 }
 
-interface SpeechRecognitionInstance {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  maxAlternatives: number
-  start(): void
-  stop(): void
-  abort(): void
-  onresult: ((event: SpeechRecognitionEvent) => void) | null
-  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
-  onend: (() => void) | null
-  onstart: (() => void) | null
-}
+export function useVoiceInput(onTranscript: (text: string) => void, _options?: { paused?: boolean }) {
+  const [isRecording, setIsRecording] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
 
-interface SpeechRecognitionEvent {
-  results: SpeechRecognitionResultList
-  resultIndex: number
-}
-
-interface SpeechRecognitionResultList {
-  length: number
-  item(index: number): SpeechRecognitionResult
-  [index: number]: SpeechRecognitionResult
-}
-
-interface SpeechRecognitionResult {
-  isFinal: boolean
-  length: number
-  item(index: number): SpeechRecognitionAlternative
-  [index: number]: SpeechRecognitionAlternative
-}
-
-interface SpeechRecognitionAlternative {
-  transcript: string
-  confidence: number
-}
-
-interface SpeechRecognitionErrorEvent {
-  error: string
-  message: string
-}
-
-function getSpeechRecognition(): (new () => SpeechRecognitionInstance) | null {
-  if (typeof window === 'undefined') return null
-  if ('SpeechRecognition' in window) return window.SpeechRecognition
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if ('webkitSpeechRecognition' in window) return (window as any).webkitSpeechRecognition
-  return null
-}
-
-interface UseVoiceInputOptions {
-  autoRestart?: boolean
-  paused?: boolean
-  lang?: string
-}
-
-export function useVoiceInput(
-  onTranscript: (text: string) => void,
-  options?: UseVoiceInputOptions
-) {
-  const { autoRestart = true, paused = false, lang = '' } = options ?? {}
-
-  const [isListening, setIsListening] = useState(false)
-  const [interimText, setInterimText] = useState('')
-
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-  const unmountedRef = useRef(false)
-  const pausedRef = useRef(paused)
-  const hasStartedRef = useRef(false)
-  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const onTranscriptRef = useRef(onTranscript)
-
-  // Keep refs in sync with latest values
-  useEffect(() => { pausedRef.current = paused }, [paused])
-  useEffect(() => { onTranscriptRef.current = onTranscript }, [onTranscript])
-
-  const createAndStart = useCallback(() => {
-    const SpeechRecognitionCtor = getSpeechRecognition()
-    if (!SpeechRecognitionCtor) {
-      console.warn('[useVoiceInput] Web Speech API not available')
-      return
-    }
-    if (unmountedRef.current || !hasStartedRef.current) return
-
-    const recognition = new SpeechRecognitionCtor()
-    recognition.lang = lang
-    recognition.continuous = true   // stay alive — no restart needed
-    recognition.interimResults = true
-    recognition.maxAlternatives = 1
-
-    recognition.onstart = () => {
-      setIsListening(true)
-    }
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        if (result.isFinal) {
-          const transcript = result[0].transcript.trim()
-          if (transcript) {
-            onTranscriptRef.current(transcript)
-            setInterimText('')
-          }
-        } else {
-          interim += result[0].transcript
-        }
-      }
-      if (interim) setInterimText(interim)
-    }
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'no-speech') {
-        // Silently restart — no speech detected in this segment
-        return
-      }
-      console.error('[useVoiceInput] SpeechRecognition error:', event.error, event.message)
-    }
-
-    recognition.onend = () => {
-      setIsListening(false)
-      setInterimText('')
-      recognitionRef.current = null
-
-      if (unmountedRef.current) return
-      if (!hasStartedRef.current) return
-      if (pausedRef.current) return
-      if (!autoRestart) return
-
-      // Auto-restart after 300ms
-      restartTimerRef.current = setTimeout(() => {
-        if (!unmountedRef.current && hasStartedRef.current && !pausedRef.current) {
-          createAndStart()
-        }
-      }, 300)
-    }
-
+  const startListening = useCallback(async () => {
+    if (isRecording || isProcessing) return
     try {
-      recognition.start()
-      recognitionRef.current = recognition
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+
+      // pick best supported mime
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find(m => MediaRecorder.isTypeSupported(m)) ?? ''
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+      chunksRef.current = []
+
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+
+      mr.onstop = async () => {
+        // stop mic tracks
+        streamRef.current?.getTracks().forEach(t => t.stop())
+        streamRef.current = null
+        setIsRecording(false)
+        setIsProcessing(true)
+
+        try {
+          const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' })
+          const arrayBuf = await blob.arrayBuffer()
+          const audioCtx = new AudioContext()
+          const decoded = await audioCtx.decodeAudioData(arrayBuf)
+          audioCtx.close()
+          const wav = encodeWAV(decoded)
+
+          const formData = new FormData()
+          formData.append('audio', new Blob([wav], { type: 'audio/wav' }), 'recording.wav')
+
+          const res = await fetch('/api/stt', { method: 'POST', body: formData })
+          if (res.ok) {
+            const data = await res.json() as { text: string }
+            if (data.text?.trim()) onTranscript(data.text.trim())
+          }
+        } catch (e) {
+          console.error('[voice] STT failed:', e)
+        }
+        setIsProcessing(false)
+      }
+
+      mr.start(100)
+      mediaRecorderRef.current = mr
+      setIsRecording(true)
     } catch (e) {
-      console.error('[useVoiceInput] Failed to start SpeechRecognition:', e)
+      console.error('[voice] mic access failed:', e)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, autoRestart])
+  }, [isRecording, isProcessing, onTranscript])
 
-  // Handle paused changes: abort when paused, restart when unpaused (if hasStarted)
-  useEffect(() => {
-    if (paused) {
-      // Cancel any pending restart
-      if (restartTimerRef.current) {
-        clearTimeout(restartTimerRef.current)
-        restartTimerRef.current = null
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort() } catch {}
-        recognitionRef.current = null
-      }
-      setIsListening(false)
-      setInterimText('')
-    } else {
-      // Resume: restart only if hasStarted
-      if (hasStartedRef.current && !unmountedRef.current) {
-        createAndStart()
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paused])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    unmountedRef.current = false
-    return () => {
-      unmountedRef.current = true
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort() } catch {}
-        recognitionRef.current = null
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // startListening: must be called inside a user gesture (click handler)
-  const startListening = useCallback(() => {
-    hasStartedRef.current = true
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current)
-      restartTimerRef.current = null
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort() } catch {}
-      recognitionRef.current = null
-    }
-    createAndStart()
-  }, [createAndStart])
-
-  // stopListening: permanently stops until startListening() is called again
   const stopListening = useCallback(() => {
-    hasStartedRef.current = false
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current)
-      restartTimerRef.current = null
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort() } catch {}
-      recognitionRef.current = null
-    }
-    setIsListening(false)
-    setInterimText('')
   }, [])
 
-  // toggleRecording: compatibility alias
   const toggleRecording = useCallback(() => {
-    if (isListening || hasStartedRef.current) stopListening()
-    else startListening()
-  }, [isListening, stopListening, startListening])
+    if (isRecording) stopListening()
+    else void startListening()
+  }, [isRecording, startListening, stopListening])
 
   return {
-    isListening,
-    interimText,
-    isProcessing: false,  // always false — compatibility
+    isRecording,
+    isListening: isRecording,
+    isProcessing,
+    interimText: isProcessing ? '⏳ processing...' : '',
     startListening,
     stopListening,
-    // Compatibility aliases for ChatPanel
-    isRecording: isListening,
     toggleRecording,
   }
 }

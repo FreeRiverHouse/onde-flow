@@ -341,8 +341,8 @@ export default function EmilioPage() {
             {/* Card 1: Talk to Emilio — cyan */}
             <button
               onClick={() => {
-                startListening()  // user gesture — Chrome lo accetta
-                setStartMode('user')
+                setStartMode('user')     // navigate immediately
+                void startListening()    // mic request — user gesture still valid
               }}
               className="boot-card-cyan"
               style={{
