@@ -74,7 +74,7 @@ export function useVoiceInput(
   onTranscript: (text: string) => void,
   options?: UseVoiceInputOptions
 ) {
-  const { autoRestart = true, paused = false, lang = 'it-IT' } = options ?? {}
+  const { autoRestart = true, paused = false, lang = '' } = options ?? {}
 
   const [isListening, setIsListening] = useState(false)
   const [interimText, setInterimText] = useState('')
@@ -100,7 +100,7 @@ export function useVoiceInput(
 
     const recognition = new SpeechRecognitionCtor()
     recognition.lang = lang
-    recognition.continuous = false
+    recognition.continuous = true   // stay alive — no restart needed
     recognition.interimResults = true
     recognition.maxAlternatives = 1
 
