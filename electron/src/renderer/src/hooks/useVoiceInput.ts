@@ -1,8 +1,6 @@
-'use client'
+import { useRef, useState, useCallback, useEffect } from 'react'
 
-import { useRef, useState, useCallback } from 'react'
-
-// WAV encoder
+// WAV encoder (PCM 16-bit, mono)
 function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   const numChannels = 1
   const sampleRate = audioBuffer.sampleRate
@@ -32,20 +30,33 @@ function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   return buffer
 }
 
-export function useVoiceInput(onTranscript: (text: string) => void, _options?: { paused?: boolean }) {
+export function useVoiceInput(onTranscript: (text: string) => void) {
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [interimText, setInterimText] = useState('')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
 
+  // Fn key listener from main process
+  useEffect(() => {
+    if (window.api?.onToggleRecording) {
+      window.api.onToggleRecording((active) => {
+        if (active) void startListening()
+        else stopListening()
+      })
+    }
+    return () => {
+      window.api?.removeToggleRecording?.()
+    }
+  }, [])
+
   const startListening = useCallback(async () => {
     if (isRecording || isProcessing) return
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
       streamRef.current = stream
 
-      // pick best supported mime
       const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'].find(m => MediaRecorder.isTypeSupported(m)) ?? ''
       const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
       chunksRef.current = []
@@ -53,11 +64,11 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
 
       mr.onstop = async () => {
-        // stop mic tracks
         streamRef.current?.getTracks().forEach(t => t.stop())
         streamRef.current = null
         setIsRecording(false)
         setIsProcessing(true)
+        setInterimText('⏳ Transcribing...')
 
         try {
           const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' })
@@ -67,16 +78,20 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
           audioCtx.close()
           const wav = encodeWAV(decoded)
 
-          const formData = new FormData()
-          formData.append('audio', new Blob([wav], { type: 'audio/wav' }), 'recording.wav')
-
-          const res = await fetch('/api/stt', { method: 'POST', body: formData })
-          if (res.ok) {
-            const data = await res.json() as { text: string }
-            if (data.text?.trim()) onTranscript(data.text.trim())
+          // Use Electron IPC to send to Whisper (not Next.js API)
+          if (window.api?.sendAudioToMain) {
+            const text = await window.api.sendAudioToMain(wav)
+            if (text?.trim()) {
+              setInterimText('')
+              onTranscript(text.trim())
+            } else {
+              setInterimText('')
+            }
           }
         } catch (e) {
           console.error('[voice] STT failed:', e)
+          setInterimText('⚠️ STT error')
+          setTimeout(() => setInterimText(''), 3000)
         }
         setIsProcessing(false)
       }
@@ -84,6 +99,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
       mr.start(100)
       mediaRecorderRef.current = mr
       setIsRecording(true)
+      setInterimText('🎙 Listening...')
     } catch (e) {
       console.error('[voice] mic access failed:', e)
     }
@@ -105,7 +121,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
     isRecording,
     isListening: isRecording,
     isProcessing,
-    interimText: isProcessing ? '⏳ processing...' : '',
+    interimText,
     startListening,
     stopListening,
     toggleRecording,

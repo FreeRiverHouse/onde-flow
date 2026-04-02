@@ -1,16 +1,12 @@
 'use client'
 
-// === FILE: src/app/emilio/components/ChatPanel.tsx ===
-// Holographic dark cyberpunk-chill chat interface
-
 import { useRef, useEffect } from 'react'
 
 // ─── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
   bg:           '#00000a',
-  bgPanel:      'rgba(0,0,10,0.92)',
+  bgPanel:      'rgba(0,0,10,0.95)',
   borderCyan:   'rgba(0,245,255,0.15)',
-  borderPurple: 'rgba(124,58,237,0.3)',
   cyan:         '#00f5ff',
   purple:       '#7c3aed',
   amber:        '#f59e0b',
@@ -19,110 +15,43 @@ const C = {
   red:          '#ff3b3b',
   green:        '#00ff9f',
   font:         "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
-} as const
+}
 
-// ─── Injected global styles (scanline + glitch + pulse keyframes) ──────────────
 const GLOBAL_STYLES = `
-  @keyframes scanline {
-    0%   { transform: translateY(-100%); }
-    100% { transform: translateY(100vh); }
-  }
   @keyframes micPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,59,0.6); }
     50%       { box-shadow: 0 0 0 8px rgba(255,59,59,0); }
-  }
-  @keyframes cyanPulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(0,245,255,0.4); }
-    50%       { box-shadow: 0 0 0 6px rgba(0,245,255,0); }
-  }
-  @keyframes listeningPulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,159,0.5); }
-    50%       { opacity: 0.7; box-shadow: 0 0 0 5px rgba(0,255,159,0); }
-  }
-  @keyframes borderGlow {
-    0%, 100% { border-color: rgba(0,245,255,0.15); }
-    50%       { border-color: rgba(0,245,255,0.4); }
   }
   @keyframes spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
   }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
 `
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
-type EmilioBackend = 'opus-distill' | 'sonnet' | 'coder'
+type Message = {
+  role: 'user' | 'emilio' | 'system'
+  content: string
+  emotion?: string
+  timestamp: number
+}
 
 interface ChatPanelProps {
-  messages: Array<{ role: 'user' | 'shopkeeper' | 'system' | 'bot'; content: string; emotion?: string }>
+  messages: Message[]
   isLoading: boolean
   inputValue: string
   onInputChange: (v: string) => void
   onSubmit: (e: React.FormEvent) => void
   onReset: () => void
-  activeApp: string | null
-  ondeFlowMode: 'EMILIO_ACTIVE' | 'CODER_ACTIVE' | 'IDLE'
-  currentBackend: EmilioBackend
-  onSwitchBackend: (b: EmilioBackend) => void
-  isSwitchingBackend: boolean
-  isGPRunning: boolean
-  gpStep: number
-  gpTotal: number
-  onRunGP: () => void
-  onStopGP: () => void
-  isVoiceRecording?: boolean
-  isVoiceProcessing?: boolean
-  onToggleVoice?: () => void
-  isListening?: boolean
-  interimText?: string
+  isRecording?: boolean
+  onToggleRecording?: () => void
+  activeApp?: string | null
+  ondeFlowMode?: 'EMILIO_ACTIVE' | 'CODER_ACTIVE' | 'IDLE'
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
-function BackendPill({
-  label, backend, currentBackend, onSwitchBackend, isSwitchingBackend
-}: {
-  label: string
-  backend: EmilioBackend
-  currentBackend: EmilioBackend
-  onSwitchBackend: (b: EmilioBackend) => void
-  isSwitchingBackend: boolean
-}) {
-  const isActive = currentBackend === backend
-  return (
-    <button
-      onClick={() => onSwitchBackend(backend)}
-      disabled={isSwitchingBackend}
-      style={{
-        background: isActive ? `rgba(0,245,255,0.12)` : 'transparent',
-        border: `1px solid ${isActive ? C.cyan : 'rgba(0,245,255,0.18)'}`,
-        color: isActive ? C.cyan : 'rgba(0,245,255,0.35)',
-        fontSize: 9,
-        padding: '2px 7px',
-        borderRadius: 3,
-        cursor: isSwitchingBackend ? 'not-allowed' : 'pointer',
-        fontFamily: C.font,
-        letterSpacing: 1,
-        opacity: isSwitchingBackend ? 0.5 : 1,
-        transition: 'all 0.2s',
-        boxShadow: isActive ? `0 0 6px rgba(0,245,255,0.3)` : 'none',
-      }}
-    >
-      {label}
-    </button>
-  )
-}
-
-function ModeBadge({ mode }: { mode: 'EMILIO_ACTIVE' | 'CODER_ACTIVE' | 'IDLE' }) {
-  const color = mode === 'EMILIO_ACTIVE' ? C.green : mode === 'CODER_ACTIVE' ? C.amber : 'rgba(100,116,139,0.8)'
-  const label = mode === 'EMILIO_ACTIVE' ? 'EMILIO' : mode === 'CODER_ACTIVE' ? 'CODER' : 'IDLE'
-  return (
-    <span style={{ color, fontSize: 10, letterSpacing: 2, fontFamily: C.font, display: 'flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: `0 0 4px ${color}` }} />
-      {label}
-    </span>
-  )
-}
-
-// ─── Main component ────────────────────────────────────────────────────────────
 export default function ChatPanel({
   messages,
   isLoading,
@@ -130,403 +59,207 @@ export default function ChatPanel({
   onInputChange,
   onSubmit,
   onReset,
+  isRecording = false,
+  onToggleRecording,
   activeApp,
-  ondeFlowMode,
-  currentBackend,
-  onSwitchBackend,
-  isSwitchingBackend,
-  isGPRunning,
-  gpStep,
-  gpTotal,
-  onRunGP,
-  onStopGP,
-  isVoiceRecording = false,
-  isVoiceProcessing = false,
-  onToggleVoice,
-  isListening = false,
-  interimText = '',
+  ondeFlowMode = 'IDLE',
 }: ChatPanelProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const emotionEmoji: Record<string, string> = {
+    excited: '✨', thinking: '💭', proud: '🎯',
+    focused: '🔍', relaxed: '🌊', happy: '😄', neutral: ''
+  }
 
   return (
     <>
-      {/* Inject keyframe styles once */}
       <style>{GLOBAL_STYLES}</style>
-
       <div style={{
         width: '40%',
-        height: '100vh',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        background: C.bg,
+        background: C.bgPanel,
         borderLeft: `1px solid ${C.borderCyan}`,
         fontFamily: C.font,
-        overflow: 'hidden',
-        position: 'relative',
-        backdropFilter: 'blur(8px)',
-        boxShadow: `inset -1px 0 0 rgba(0,245,255,0.06)`,
       }}>
 
-        {/* Scanline overlay */}
+        {/* ── Header ── */}
         <div style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10,
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            position: 'absolute', left: 0, right: 0, height: '2px',
-            background: 'linear-gradient(transparent, rgba(0,245,255,0.04), transparent)',
-            animation: 'scanline 6s linear infinite',
-          }} />
-        </div>
-
-        {/* ── Header ─────────────────────────────────────────────────────────── */}
-        <div style={{
-          padding: '10px 16px 10px',
+          padding: '14px 16px 10px',
           borderBottom: `1px solid ${C.borderCyan}`,
-          background: 'rgba(0,245,255,0.02)',
-          animation: 'borderGlow 4s ease-in-out infinite',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
         }}>
-          {/* Brand */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ color: C.cyan, fontSize: 13, letterSpacing: 4, fontWeight: 700 }}>
-              ONDE-FLOW // AI FACTORY
+          <div>
+            <div style={{ color: C.cyan, fontSize: 12, letterSpacing: 2 }}>
+              ONDE-FLOW // EMILIO
             </div>
-            <div style={{ color: C.textDim, fontSize: 9, letterSpacing: 3, marginTop: 2 }}>
-              DIRECT INTERFACE v3.0 // {ondeFlowMode}
-            </div>
-          </div>
-
-          {/* Backend switcher row */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <BackendPill label="OPUS" backend="opus-distill" currentBackend={currentBackend} onSwitchBackend={onSwitchBackend} isSwitchingBackend={isSwitchingBackend} />
-              <BackendPill label="SONNET" backend="sonnet" currentBackend={currentBackend} onSwitchBackend={onSwitchBackend} isSwitchingBackend={isSwitchingBackend} />
-              <BackendPill label="CODER" backend="coder" currentBackend={currentBackend} onSwitchBackend={onSwitchBackend} isSwitchingBackend={isSwitchingBackend} />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {/* LISTENING indicator */}
-              {isListening && (
-                <span style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  color: C.green,
-                  fontSize: 9,
-                  letterSpacing: 2,
-                  fontFamily: C.font,
-                  animation: 'listeningPulse 1.4s ease-in-out infinite',
-                }}>
-                  <span style={{
-                    display: 'inline-block',
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: C.green,
-                    boxShadow: `0 0 6px ${C.green}`,
-                  }} />
-                  LISTENING
-                </span>
-              )}
-
-              {/* GP button */}
-              <button
-                onClick={isGPRunning ? onStopGP : onRunGP}
-                style={{
-                  background: 'transparent',
-                  border: `1px solid ${isGPRunning ? C.red : 'rgba(0,245,255,0.2)'}`,
-                  color: isGPRunning ? C.red : 'rgba(0,245,255,0.55)',
-                  fontSize: 9,
-                  padding: '2px 8px',
-                  borderRadius: 3,
-                  cursor: 'pointer',
-                  fontFamily: C.font,
-                  letterSpacing: 1,
-                }}
-              >
-                {isGPRunning ? `◈ ${gpStep}/${gpTotal}` : '◈ GP'}
-              </button>
-              <ModeBadge mode={ondeFlowMode} />
+            <div style={{ color: C.textDim, fontSize: 10, marginTop: 2 }}>
+              {ondeFlowMode === 'CODER_ACTIVE' ? '⚡ CODER ACTIVE' :
+               ondeFlowMode === 'EMILIO_ACTIVE' ? '🟢 LISTENING' : '○ IDLE'}
+              {activeApp && ` · 📂 ${activeApp.toUpperCase()}`}
             </div>
           </div>
-
-          {/* Active app tag */}
-          {activeApp && (
-            <div style={{
-              display: 'inline-block',
-              background: 'rgba(0,245,255,0.06)',
-              border: `1px solid rgba(0,245,255,0.25)`,
-              borderRadius: 3,
-              fontSize: 9,
-              padding: '2px 8px',
-              marginTop: 6,
-              color: C.cyan,
-              letterSpacing: 2,
-            }}>
-              APP // {activeApp.toUpperCase()}
-            </div>
-          )}
+          <button
+            onClick={onReset}
+            style={{
+              background: 'transparent', border: `1px solid ${C.borderCyan}`,
+              color: C.textDim, borderRadius: 4, padding: '3px 8px',
+              fontSize: 10, cursor: 'pointer', letterSpacing: 1
+            }}
+          >
+            RESET
+          </button>
         </div>
 
-        {/* ── Banners ─────────────────────────────────────────────────────────── */}
-        {isSwitchingBackend && (
-          <div style={{
-            background: 'rgba(0,245,255,0.06)',
-            color: C.cyan,
-            fontSize: 10,
-            padding: '7px 16px',
-            textAlign: 'center',
-            letterSpacing: 2,
-            borderBottom: `1px solid ${C.borderCyan}`,
-          }}>
-            ◈ SWITCHING MODEL...
-          </div>
-        )}
-
+        {/* ── Coder Active Banner ── */}
         {ondeFlowMode === 'CODER_ACTIVE' && (
           <div style={{
-            background: 'rgba(245,158,11,0.06)',
-            border: 'none',
-            borderBottom: `1px solid rgba(245,158,11,0.25)`,
-            color: C.amber,
-            fontSize: 10,
-            padding: '7px 16px',
-            textAlign: 'center',
-            letterSpacing: 2,
+            padding: '8px 16px',
+            background: 'rgba(245,158,11,0.08)',
+            borderBottom: `1px solid rgba(245,158,11,0.3)`,
+            color: C.amber, fontSize: 11, letterSpacing: 1,
+            display: 'flex', alignItems: 'center', gap: 8
           }}>
-            ⬡ CODER ACTIVE — AUTONOMOUS MODE
+            <div style={{ animation: 'spin 2s linear infinite', display: 'inline-block' }}>⚡</div>
+            CODER ACTIVE — speak to interrupt
           </div>
         )}
 
-        {/* ── Messages ────────────────────────────────────────────────────────── */}
+        {/* ── Messages ── */}
         <div style={{
-          flex: 1,
-          overflow: 'auto',
-          padding: '14px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          scrollbarWidth: 'thin',
-          scrollbarColor: 'rgba(0,245,255,0.15) transparent',
+          flex: 1, overflowY: 'auto', padding: '12px 14px',
+          display: 'flex', flexDirection: 'column', gap: 10,
         }}>
-          {messages.map((m, i) => {
-            if (m.role === 'user') {
+          {messages.map((msg, i) => {
+            if (msg.role === 'system') {
               return (
                 <div key={i} style={{
-                  alignSelf: 'flex-end',
-                  background: 'rgba(124,58,237,0.1)',
-                  border: '1px solid rgba(124,58,237,0.35)',
-                  borderRadius: '10px 10px 2px 10px',
-                  padding: '8px 12px',
-                  fontSize: 12,
-                  color: C.textPrimary,
-                  maxWidth: '78%',
-                  lineHeight: 1.5,
-                  boxShadow: '0 0 8px rgba(124,58,237,0.15)',
+                  color: 'rgba(255,255,255,0.35)', fontSize: 10,
+                  textAlign: 'center', letterSpacing: 1, padding: '4px 0',
+                  borderTop: '1px solid rgba(255,255,255,0.05)',
+                  borderBottom: '1px solid rgba(255,255,255,0.05)',
                 }}>
-                  {m.content}
+                  {msg.content}
                 </div>
               )
             }
 
-            if (m.role === 'shopkeeper') {
-              return (
-                <div key={i} style={{
-                  alignSelf: 'flex-start',
-                  background: 'rgba(0,245,255,0.05)',
-                  border: `1px solid rgba(0,245,255,0.2)`,
-                  borderRadius: '2px 10px 10px 10px',
-                  padding: '8px 12px',
-                  fontSize: 12,
-                  color: C.textPrimary,
-                  maxWidth: '83%',
-                  lineHeight: 1.5,
-                  boxShadow: '0 0 8px rgba(0,245,255,0.08)',
-                }}>
-                  <span style={{ color: C.cyan, marginRight: 6, fontSize: 11 }}>◈</span>
-                  {m.content}
-                </div>
-              )
-            }
-
-            if (m.role === 'bot') {
-              return (
-                <div key={i} style={{
-                  alignSelf: 'flex-end',
-                  background: 'rgba(124,58,237,0.06)',
-                  border: '1px dashed rgba(124,58,237,0.4)',
-                  borderRadius: '10px 10px 2px 10px',
-                  padding: '8px 12px',
-                  fontSize: 12,
-                  color: '#c4b5fd',
-                  maxWidth: '78%',
-                  lineHeight: 1.5,
-                }}>
-                  {m.content}
-                </div>
-              )
-            }
-
-            // system
+            const isUser = msg.role === 'user'
             return (
               <div key={i} style={{
-                alignSelf: 'center',
-                color: 'rgba(0,255,159,0.6)',
-                fontSize: 10,
-                letterSpacing: 1,
-                fontStyle: 'italic',
-                padding: '2px 0',
+                display: 'flex', flexDirection: 'column',
+                alignItems: isUser ? 'flex-end' : 'flex-start',
               }}>
-                {m.content}
+                <div style={{
+                  maxWidth: '88%',
+                  background: isUser
+                    ? 'rgba(0,245,255,0.08)'
+                    : 'rgba(124,58,237,0.1)',
+                  border: `1px solid ${isUser ? 'rgba(0,245,255,0.2)' : 'rgba(124,58,237,0.25)'}`,
+                  borderRadius: isUser ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                  padding: '8px 12px',
+                  color: C.textPrimary,
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}>
+                  {msg.content}
+                </div>
+                {msg.emotion && !isUser && (
+                  <span style={{ fontSize: 10, color: C.textDim, marginTop: 2, paddingLeft: 4 }}>
+                    {emotionEmoji[msg.emotion] || ''} {msg.emotion}
+                  </span>
+                )}
               </div>
             )
           })}
-          <div ref={messagesEndRef} />
-        </div>
 
-        {/* ── Input form ──────────────────────────────────────────────────────── */}
-        <div style={{
-          padding: '10px 14px 12px',
-          borderTop: `1px solid ${C.borderCyan}`,
-          background: 'rgba(0,245,255,0.015)',
-        }}>
-          {/* Interim text (what the user is saying right now) */}
-          {interimText && (
+          {/* Loading dots */}
+          {isLoading && (
             <div style={{
-              marginBottom: 6,
-              fontSize: 11,
-              fontStyle: 'italic',
-              color: 'rgba(0,245,255,0.6)',
-              fontFamily: C.font,
-              letterSpacing: 0.5,
-              paddingLeft: 2,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              display: 'flex', gap: 4, padding: '8px 4px'
             }}>
-              〜 &quot;{interimText}&quot;
+              {[0, 1, 2].map(d => (
+                <div key={d} style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: C.purple,
+                  animation: `blink 1.2s ease-in-out ${d * 0.2}s infinite`
+                }} />
+              ))}
             </div>
           )}
+          <div ref={bottomRef} />
+        </div>
 
-          <form onSubmit={onSubmit} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {/* Mic button */}
-            {onToggleVoice && (
-              <button
-                type="button"
-                onClick={onToggleVoice}
-                title={isVoiceRecording ? 'Stop recording' : 'Start voice input'}
-                style={{
-                  flexShrink: 0,
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: isVoiceRecording
-                    ? 'rgba(255,59,59,0.15)'
-                    : isVoiceProcessing
-                      ? 'rgba(245,158,11,0.1)'
-                      : 'rgba(0,245,255,0.05)',
-                  border: `1px solid ${isVoiceRecording ? C.red : isVoiceProcessing ? C.amber : 'rgba(0,245,255,0.25)'}`,
-                  color: isVoiceRecording ? C.red : isVoiceProcessing ? C.amber : C.cyan,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  animation: isVoiceRecording ? 'micPulse 1s ease-in-out infinite' : isVoiceProcessing ? 'spin 1s linear infinite' : 'none',
-                  transition: 'border-color 0.2s, background 0.2s',
-                }}
-              >
-                {isVoiceProcessing ? '◌' : isVoiceRecording ? '●' : '⬡'}
-              </button>
-            )}
-
-            {/* Text input */}
-            <input
-              type="text"
-              value={inputValue}
-              onChange={e => onInputChange(e.target.value)}
-              placeholder={
-                isListening
-                  ? 'listening...'
-                  : isVoiceProcessing
-                    ? 'thinking...'
-                    : 'type or speak...'
-              }
-              disabled={isLoading}
-              style={{
-                flex: 1,
-                background: 'rgba(0,0,10,0.7)',
-                border: `1px solid ${isVoiceRecording ? 'rgba(255,59,59,0.4)' : 'rgba(0,245,255,0.2)'}`,
-                borderRadius: 4,
-                padding: '8px 12px',
-                color: C.textPrimary,
-                fontSize: 12,
-                fontFamily: C.font,
-                outline: 'none',
-                letterSpacing: 0.5,
-                transition: 'border-color 0.2s, box-shadow 0.2s',
-              }}
-              onFocus={e => {
-                e.currentTarget.style.borderColor = C.cyan
-                e.currentTarget.style.boxShadow = `0 0 8px rgba(0,245,255,0.2)`
-              }}
-              onBlur={e => {
-                e.currentTarget.style.borderColor = isVoiceRecording ? 'rgba(255,59,59,0.4)' : 'rgba(0,245,255,0.2)'
-                e.currentTarget.style.boxShadow = 'none'
-              }}
-            />
-
-            {/* Send */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              style={{
-                flexShrink: 0,
-                background: isLoading ? 'rgba(0,245,255,0.05)' : 'rgba(0,245,255,0.12)',
-                color: isLoading ? 'rgba(0,245,255,0.35)' : C.cyan,
-                border: `1px solid ${isLoading ? 'rgba(0,245,255,0.15)' : 'rgba(0,245,255,0.4)'}`,
-                borderRadius: 4,
-                padding: '8px 12px',
-                fontSize: 10,
-                fontWeight: 700,
-                fontFamily: C.font,
-                letterSpacing: 2,
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                boxShadow: isLoading ? 'none' : `0 0 8px rgba(0,245,255,0.2)`,
-                transition: 'all 0.2s',
-              }}
-            >
-              SEND
-            </button>
-
-            {/* Reset */}
+        {/* ── Input area ── */}
+        <form onSubmit={onSubmit} style={{
+          padding: '10px 12px',
+          borderTop: `1px solid ${C.borderCyan}`,
+          display: 'flex', gap: 8, alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          {/* Mic button */}
+          {onToggleRecording && (
             <button
               type="button"
-              onClick={onReset}
+              onClick={onToggleRecording}
               style={{
-                flexShrink: 0,
-                background: 'transparent',
-                color: 'rgba(0,245,255,0.3)',
-                border: '1px solid rgba(0,245,255,0.12)',
-                borderRadius: 4,
-                padding: '8px 8px',
-                fontSize: 10,
-                fontFamily: C.font,
-                letterSpacing: 1,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
+                background: isRecording ? 'rgba(255,50,50,0.2)' : 'transparent',
+                border: `1px solid ${isRecording ? C.red : C.borderCyan}`,
+                color: isRecording ? C.red : C.textDim,
+                borderRadius: 6, width: 36, height: 36, fontSize: 16,
+                cursor: 'pointer', flexShrink: 0, display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                animation: isRecording ? 'micPulse 1s infinite' : 'none'
               }}
-              onMouseEnter={e => { e.currentTarget.style.color = C.cyan; e.currentTarget.style.borderColor = 'rgba(0,245,255,0.3)' }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'rgba(0,245,255,0.3)'; e.currentTarget.style.borderColor = 'rgba(0,245,255,0.12)' }}
             >
-              RST
+              {isRecording ? '⏹' : '🎙'}
             </button>
-          </form>
-        </div>
+          )}
+
+          <input
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
+            placeholder="Type or use 🎙 to speak..."
+            disabled={isLoading}
+            style={{
+              flex: 1, background: 'rgba(0,245,255,0.04)',
+              border: `1px solid ${C.borderCyan}`,
+              borderRadius: 6, padding: '8px 12px',
+              color: C.textPrimary, fontSize: 13,
+              fontFamily: C.font, outline: 'none',
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                onSubmit(e as any)
+              }
+            }}
+          />
+
+          <button
+            type="submit"
+            disabled={isLoading || !inputValue.trim()}
+            style={{
+              background: isLoading ? 'transparent' : 'rgba(0,245,255,0.1)',
+              border: `1px solid ${C.borderCyan}`,
+              color: C.cyan, borderRadius: 6, padding: '8px 14px',
+              fontSize: 13, cursor: isLoading ? 'not-allowed' : 'pointer',
+              letterSpacing: 1, flexShrink: 0,
+              opacity: (!inputValue.trim() || isLoading) ? 0.4 : 1
+            }}
+          >
+            {isLoading ? '...' : 'SEND'}
+          </button>
+        </form>
+
       </div>
     </>
   )
