@@ -159,8 +159,40 @@ function pingServer(): Promise<void> {
   })
 }
 
+// ─── CLI fallback when whisper-server is unavailable ────────────────────────
+async function transcribeWithCLI(audioPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const outDir = '/tmp/onde-whisper'
+    fs.mkdirSync(outDir, { recursive: true })
+    const child = spawn('/opt/homebrew/bin/whisper', [
+      audioPath,
+      '--model', 'medium',
+      '--language', 'auto',
+      '--output_format', 'txt',
+      '--output_dir', outDir,
+      '--fp16', 'False'
+    ], { env: { ...process.env } })
+
+    child.on('close', (code) => {
+      if (code !== 0) { reject(new Error(`whisper CLI exited with ${code}`)); return }
+      const base = audioPath.split('/').pop()?.replace(/\.[^.]+$/, '') || 'audio'
+      const txtPath = `${outDir}/${base}.txt`
+      try {
+        const text = fs.readFileSync(txtPath, 'utf-8').trim()
+        fs.unlinkSync(txtPath)
+        resolve(text)
+      } catch { reject(new Error('whisper CLI output not found')) }
+    })
+    child.on('error', reject)
+  })
+}
+
 export async function transcribeAudio(audioPath: string): Promise<string> {
-  if (!serverReady) throw new Error('whisper-server not ready')
+  // Use CLI fallback if server not ready (e.g. dev mode without compiled server)
+  if (!serverReady) {
+    log('INFO', 'whisper', 'Server not ready, falling back to CLI')
+    return transcribeWithCLI(audioPath)
+  }
 
   const fileData = await fs.promises.readFile(audioPath)
   const boundary = '----OVBoundary' + Date.now()
