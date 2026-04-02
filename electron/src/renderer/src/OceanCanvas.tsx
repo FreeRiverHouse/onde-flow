@@ -28,12 +28,12 @@ export default function OceanCanvas({ emotion }: OceanCanvasProps) {
       <fog attach="fog" args={['#0a0a1a', 15, 35]} />
 
       {/* Ambient light */}
-      <ambientLight intensity={0.3} color={#ff9966} />
+      <ambientLight intensity={0.3} color="#ff9966" />
 
       {/* Warm point lights */}
-      <pointLight position={[-4, 3, 2]} intensity={1.2} color={#ffcc44} distance={20} decay={2} />
-      <pointLight position={[4, 1, -1]} intensity={0.8} color={#ff8844} distance={18} decay={2} />
-      <pointLight position={[0, -2, 3]} intensity={0.5} color={#00d4ff} distance={12} decay={2} />
+      <pointLight position={[-4, 3, 2]} intensity={1.2} color="#ffcc44" distance={20} decay={2} />
+      <pointLight position={[4, 1, -1]} intensity={0.8} color="#ff8844" distance={18} decay={2} />
+      <pointLight position={[0, -2, 3]} intensity={0.5} color="#00d4ff" distance={12} decay={2} />
 
       {/* Perspective camera - user can look around */}
       <PerspectiveCamera makeDefault fov={60} position={[0, 1.5, 6]} near={0.1} far={100} />

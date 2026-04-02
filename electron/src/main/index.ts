@@ -1,5 +1,10 @@
 import { app, shell, BrowserWindow, ipcMain, globalShortcut, session, systemPreferences } from 'electron'
 import { join } from 'path'
+import * as dotenv from 'dotenv'
+
+// Load .env file
+dotenv.config({ path: join(__dirname, '../../.env') })
+dotenv.config({ path: join(app.getAppPath(), '.env') })
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { transcribeAudio, startWhisperServer, stopWhisperServer, isWhisperReady, onWhisperStatus } from './whisper/engine'
@@ -95,11 +100,15 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    x: 100,
+    y: 100,
     minWidth: 900,
     minHeight: 600,
     show: false,
+    alwaysOnTop: true,
     resizable: true,
-    title: 'OndeFlow',
+    title: 'OndeFlow // Creative OS',
+    backgroundColor: '#02020c',
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -113,6 +122,9 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+    mainWindow?.focus()
+    mainWindow?.moveTop()
+    console.log('[OndeFlow] Window shown')
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

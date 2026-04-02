@@ -21,25 +21,29 @@
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",
+    "@nut-tree-fork/nut-js": "^4.2.6",
     "@ricky0123/vad-node": "^0.0.3",
     "better-sqlite3": "^12.6.2",
+    "dotenv": "^16.6.1",
     "electron-updater": "^6.8.3",
     "koffi": "^2.15.1",
     "node-addon-api": "^1.7.2",
     "node-global-key-listener": "^0.3.0",
-    "@nut-tree-fork/nut-js": "^4.2.6",
-    "uuid": "^13.0.0",
-    "onnxruntime-node": "^1.24.2"
+    "onnxruntime-node": "^1.24.2",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.183.1",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.53.0",
     "@typescript-eslint/parser": "^8.53.0",
@@ -57,11 +61,8 @@
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "tailwindcss": "^4.2.0",
-    "typescript": "^5.9.3",
-    "vite": "^7.2.6",
-    "@react-three/fiber": "^9.5.0",
-    "@react-three/drei": "^10.7.7",
     "three": "^0.183.2",
-    "@types/three": "^0.183.1"
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
   }
 }
