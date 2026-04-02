@@ -9,6 +9,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { transcribeAudio, startWhisperServer, stopWhisperServer, isWhisperReady, onWhisperStatus } from './whisper/engine'
 import { startTTSServer, stopTTSServer, speakText, isTTSReady, onTTSStatus } from './tts'
+import { startCoder, stopCoder, getCoderState, onCoderEvent, offCoderEvent } from './coder'
 import { initDb, saveConversation, getConversations } from './db'
 import { logger, getRecentLogs, getLogFilePath } from './logger'
 import { v4 as uuidv4 } from 'uuid'
@@ -308,6 +309,33 @@ app.whenReady().then(async () => {
       shell.openExternal(url)
     }
   })
+
+  // ─── Coder IPC ────────────────────────────────────────────────────────────
+  ipcMain.handle('coder-start', async (_e, { task, appName }: { task: string; appName: string }) => {
+    const apiKey = process.env.OPENROUTER_API_KEY || ''
+    
+    // Stream coder events to renderer
+    const cb = (event: any) => {
+      BrowserWindow.getAllWindows().forEach(w => w.webContents.send('coder-event', event))
+    }
+    onCoderEvent(cb)
+    
+    // Start coder (non-blocking)
+    startCoder(task, appName, apiKey).catch(err => {
+      logger.error('coder', String(err))
+    }).finally(() => {
+      offCoderEvent(cb)
+    })
+    
+    return { ok: true }
+  })
+
+  ipcMain.handle('coder-stop', () => {
+    stopCoder()
+    return { ok: true }
+  })
+
+  ipcMain.handle('coder-state', () => getCoderState())
 
   // Get app context for sub-apps
   ipcMain.handle('get-app-context', async (_e, appName: string) => {

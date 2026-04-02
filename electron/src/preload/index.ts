@@ -35,6 +35,15 @@ const api = {
   // ─── EXTERNAL LINKS ──────────────────────────────────────────────────────────
   openExternal: (url: string) => ipcRenderer.invoke("open-external", url),
 
+  // ─── CODER ────────────────────────────────────────────────────────────────────
+  coderStart: (task: string, appName: string) => ipcRenderer.invoke("coder-start", { task, appName }),
+  coderStop: () => ipcRenderer.invoke("coder-stop"),
+  coderState: () => ipcRenderer.invoke("coder-state"),
+  onCoderEvent: (cb: (event: any) => void) => {
+    ipcRenderer.on("coder-event", (_e, v) => cb(v))
+  },
+  removeCoderEvent: () => ipcRenderer.removeAllListeners("coder-event"),
+
   // ─── TTS (Text to Speech - VibeVoice) ────────────────────────────────────────
   ttsReady: () => ipcRenderer.invoke("tts-ready"),
   ttsSpeak: (text: string, emotion?: string) => ipcRenderer.invoke("tts-speak", { text, emotion }),

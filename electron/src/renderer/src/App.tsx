@@ -46,6 +46,24 @@ export default function App() {
     window.api?.onWhisperStatus?.((s) => setWhisperReady(s === 'ready'))
   }, [])
 
+  // Coder events
+  useEffect(() => {
+    window.api?.onCoderEvent?.((event: any) => {
+      if (event.type === 'state') {
+        if (event.state === 'IDLE' || event.state === 'DONE') setOndeFlowMode('IDLE')
+        else setOndeFlowMode('CODER_ACTIVE')
+      }
+      if (event.message) {
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: event.message,
+          timestamp: Date.now()
+        }])
+      }
+    })
+    return () => { window.api?.removeCoderEvent?.() }
+  }, [])
+
   // Send message to Emilio via OpenRouter
   const sendToEmilio = useCallback(async (userMsg: string) => {
     if (!userMsg.trim() || isLoading) return
@@ -72,9 +90,11 @@ export default function App() {
       // Handle actions
       if (response.action === 'start_coder') {
         setOndeFlowMode('CODER_ACTIVE')
+        const coderTask = (response as any).coderPayload?.tasks?.[0] || userMsg
+        void window.api.coderStart?.(coderTask, activeApp || 'game-studio')
         setMessages(prev => [...prev, {
           role: 'system',
-          content: '⚡ Coder started — I\'m on it!',
+          content: '⚡ Coder started — working on it!',
           timestamp: Date.now()
         }])
       } else if (response.action === 'switch_app') {
