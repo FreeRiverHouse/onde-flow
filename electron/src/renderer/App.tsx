@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import dynamic from 'next/dynamic'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import SpeechBubble from './components/SpeechBubble'
 import ChatPanel from './components/ChatPanel'
 
-// Dynamically import OceanCanvas to avoid SSR issues
-const OceanCanvas = dynamic(() => import('./OceanCanvas'), { ssr: false })
+// Lazy load OceanCanvas to avoid blocking main thread
+const OceanCanvas = lazy(() => import('./OceanCanvas'))
 
 type Message = {
   role: 'user' | 'emilio' | 'system'
