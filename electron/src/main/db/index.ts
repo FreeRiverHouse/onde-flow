@@ -123,6 +123,15 @@ export function initDb() {
       value TEXT NOT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      user_message TEXT NOT NULL,
+      emilio_reply TEXT NOT NULL,
+      action TEXT,
+      emotion TEXT,
+      timestamp DATETIME NOT NULL
+    );
   `)
 }
 
@@ -242,6 +251,27 @@ export function getProjects(): any[] {
       nextSteps: update ? JSON.parse(decryptStr(update.next_steps)) : []
     }
   })
+}
+
+// ─── Emilio Conversations ─────────────────────────────────────────────
+export function saveConversation(record: {
+  id: string
+  user_message: string
+  emilio_reply: string
+  action?: string
+  emotion?: string
+  timestamp: string
+}) {
+  db.prepare(`
+    INSERT OR REPLACE INTO conversations (id, user_message, emilio_reply, action, emotion, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(record.id, record.user_message, record.emilio_reply, record.action || null, record.emotion || null, record.timestamp)
+}
+
+export function getConversations(limit = 50): any[] {
+  return db.prepare(
+    "SELECT * FROM conversations ORDER BY timestamp DESC LIMIT ?"
+  ).all(limit) as any[]
 }
 
 // ─── Test Data Seeder (dev/testing only) ────────────────────────────────────
