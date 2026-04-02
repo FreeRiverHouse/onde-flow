@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import SpeechBubble from './components/SpeechBubble'
 import ChatPanel from './components/ChatPanel'
+import { useTTS } from './hooks/useTTS'
 
 // Lazy load OceanCanvas to avoid blocking main thread
 const OceanCanvas = lazy(() => import('./OceanCanvas'))
@@ -26,6 +27,7 @@ export default function EmilioPage() {
   const [whisperReady, setWhisperReady] = useState(false)
   const [ondeFlowMode, setOndeFlowMode] = useState<OndeFlowMode>('IDLE')
   const [activeApp, setActiveApp] = useState<string | null>(null)
+  const { ttsReady, isSpeaking, speak: ttsSpeak, stop: ttsStop } = useTTS()
 
   // Audio recording state
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -79,6 +81,9 @@ export default function EmilioPage() {
         timestamp: Date.now()
       }])
       setLastEmotion(response.emotion || 'neutral')
+
+      // Emilio speaks!
+      void ttsSpeak(response.reply, response.emotion)
 
       // Handle actions
       if (response.action === 'start_coder') {
@@ -240,8 +245,10 @@ export default function EmilioPage() {
           color: '#666',
           zIndex: 50
         }}>
-          {whisperReady && <span style={{ color: '#00d4ff' }}>🎙 STT Ready</span>}
-          {hasApiKey && <span style={{ color: '#00ff00' }}>🔑 API Key</span>}
+          {whisperReady && <span style={{ color: '#00d4ff' }}>🎙 STT</span>}
+          {ttsReady && <span style={{ color: '#a855f7' }}>🔊 TTS</span>}
+          {isSpeaking && <span style={{ color: '#ffaa00', animation: 'pulse 1s infinite' }}>🗣 Speaking...</span>}
+          {hasApiKey && <span style={{ color: '#00ff00' }}>🔑 OK</span>}
           {ondeFlowMode !== 'IDLE' && (
             <span style={{
               color: ondeFlowMode === 'CODER_ACTIVE' ? '#ffaa00' : '#00ff00'

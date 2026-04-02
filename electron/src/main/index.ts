@@ -8,6 +8,7 @@ dotenv.config({ path: join(app.getAppPath(), '.env') })
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { transcribeAudio, startWhisperServer, stopWhisperServer, isWhisperReady, onWhisperStatus } from './whisper/engine'
+import { startTTSServer, stopTTSServer, speakText, isTTSReady, onTTSStatus } from './tts'
 import { initDb, saveConversation, getConversations } from './db'
 import { logger, getRecentLogs, getLogFilePath } from './logger'
 import { v4 as uuidv4 } from 'uuid'
@@ -180,6 +181,13 @@ app.whenReady().then(async () => {
   // Start Whisper server for STT
   startWhisperServer().catch(err => logger.error('whisper', 'failed to start: ' + err))
 
+  // Start TTS server (VibeVoice)
+  onTTSStatus((status) => {
+    logger.info('tts', 'status: ' + status)
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tts-status', status))
+  })
+  startTTSServer().catch(err => logger.error('tts', 'failed to start: ' + err))
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -264,6 +272,18 @@ app.whenReady().then(async () => {
 
   // Whisper status
   ipcMain.handle('whisper-ready', () => isWhisperReady())
+
+  // TTS
+  ipcMain.handle('tts-ready', () => isTTSReady())
+  ipcMain.handle('tts-speak', async (_event, { text, emotion }: { text: string; emotion?: string }) => {
+    try {
+      const audioBuffer = await speakText(text, emotion)
+      return audioBuffer  // WAV audio as Buffer → renderer plays it
+    } catch (e) {
+      logger.error('tts', String(e))
+      throw e
+    }
+  })
 
   // Recording toggle
   ipcMain.handle('start-recording', () => {
@@ -362,6 +382,7 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   if (fnPollingInterval) clearInterval(fnPollingInterval)
   stopWhisperServer()
+  stopTTSServer()
 })
 
 app.on('window-all-closed', () => {

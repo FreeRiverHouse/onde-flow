@@ -33,6 +33,12 @@ interface OndeFlowAPI {
   // ─── EXTERNAL LINKS ──────────────────────────────────────────────────────────
   openExternal: (url: string) => Promise<void>
 
+  // ─── TTS (Text to Speech - VibeVoice) ────────────────────────────────────────
+  ttsReady: () => Promise<boolean>
+  ttsSpeak: (text: string, emotion?: string) => Promise<ArrayBuffer>
+  onTTSStatus: (cb: (status: string) => void) => void
+  removeTTSStatus: () => void
+
   // ─── PING ─────────────────────────────────────────────────────────────────────
   ping: () => Promise<void>
 }
