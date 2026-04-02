@@ -1,0 +1,51 @@
+appId: com.ondeflow.app
+productName: OndeFlow
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+win:
+  executableName: OndeFlow
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+mac:
+  identity: "A5109CD55E169001568081FE489558394D2FECD6"
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  hardenedRuntime: true
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  extendInfo:
+    NSMicrophoneUsageDescription: OndeFlow uses the microphone for voice commands with Emilio.
+  notarize: true
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: onde.surf
+  category: Utility
+appImage:
+  artifactName: ${name}-${version}.${ext}
+npmRebuild: true
+publish:
+  provider: github
+  owner: FreeRiverHouse
+  repo: onde-flow

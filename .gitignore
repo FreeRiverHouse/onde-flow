@@ -4,3 +4,8 @@ node_modules/
 .env*.local
 *.log
 .DS_Store
+
+# Electron
+electron/out/
+electron/node_modules/
+electron/dist/
