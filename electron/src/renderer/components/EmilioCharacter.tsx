@@ -102,8 +102,7 @@ export default function EmilioCharacter({
         if (ring2Ref.current) ring2Ref.current.rotation.y += 0.006
         break
       }
-      case 'happy':
-      case 'proud': {
+      case 'happy': {
         const bounce = Math.abs(Math.sin(t * 3)) * 0.05
         groupRef.current.position.y = bounce
         groupRef.current.rotation.y = Math.sin(t * 0.5) * 0.25
@@ -111,10 +110,26 @@ export default function EmilioCharacter({
         if (ring2Ref.current) ring2Ref.current.rotation.y += 0.025
         break
       }
+      case 'proud': {
+        // Slow majestic rotation, confident stillness
+        groupRef.current.position.y = Math.sin(t * 0.8) * 0.02
+        groupRef.current.rotation.y = Math.sin(t * 0.3) * 0.15
+        if (ring1Ref.current) ring1Ref.current.rotation.x += 0.012
+        if (ring2Ref.current) ring2Ref.current.rotation.y += 0.01
+        break
+      }
       case 'focused': {
         groupRef.current.position.y = Math.sin(t * 1.5) * 0.015
         if (ring1Ref.current) ring1Ref.current.rotation.x += 0.015
         if (ring2Ref.current) ring2Ref.current.rotation.y += 0.02
+        break
+      }
+      case 'relaxed': {
+        // Very slow gentle drift, calm vibes
+        groupRef.current.position.y = Math.sin(t * 0.5) * 0.02
+        groupRef.current.rotation.y = Math.sin(t * 0.25) * 0.05
+        if (ring1Ref.current) ring1Ref.current.rotation.x += 0.005
+        if (ring2Ref.current) ring2Ref.current.rotation.y += 0.004
         break
       }
       default: {
