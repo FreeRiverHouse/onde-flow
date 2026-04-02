@@ -1,56 +1,44 @@
-interface VibeTalkAPI {
-  // Recording
-  sendAudioToMain: (buffer: ArrayBuffer) => Promise<string>
-  onToggleRecording: (cb: (isRecording: boolean) => void) => void
-  removeToggleRecording: () => void
+interface EmilioResponse {
+  reply: string
+  action?: 'start_coder' | 'switch_app' | null
+  emotion?: 'neutral' | 'excited' | 'thinking' | 'proud' | 'focused' | 'relaxed' | 'happy'
+  coderPayload?: { app: string; tasks: string[]; plan: string }
+}
 
-  // Whisper
-  whisperReady: () => Promise<boolean>
+interface OndeFlowAPI {
+  // ─── STT (Speech to Text) ────────────────────────────────────────────────────
+  sendAudioToMain: (buffer: ArrayBuffer) => Promise<string>
   isWhisperReady: () => Promise<boolean>
   onWhisperStatus: (cb: (status: string) => void) => void
   removeWhisperStatus: () => void
 
-  // Dashboard
-  onDashboardUpdated: (cb: (report: any) => void) => void
-  removeDashboardUpdated: () => void
-  getDashboard: () => Promise<any>
-  generateDashboard: () => Promise<any>
-  getProjects: () => Promise<any[]>
+  // ─── Recording ────────────────────────────────────────────────────────────────
+  onToggleRecording: (cb: (isRecording: boolean) => void) => void
+  removeToggleRecording: () => void
+  startRecording: () => Promise<{ ok: boolean }>
+  stopRecording: () => Promise<{ ok: boolean }>
 
-  // History
-  getDictations: (limit?: number) => Promise<any[]>
+  // ─── EMILIO CHAT (OpenRouter) ─────────────────────────────────
+  emilioChat: (message: string, appContext?: string) => Promise<EmilioResponse>
+  emilioReset: () => Promise<{ ok: boolean }>
+  emilioHistory: () => Promise<Array<{ role: string; content: string }>>
 
-  // Logs
-  getLogs: (n?: number) => Promise<any[]>
+  // ─── APP CONTEXT ─────────────────────────────────────────────────────────────
+  getAppContext: (appName: string) => Promise<string | null>
+
+  // ─── LOGS ─────────────────────────────────────────────────────────────────────
+  getLogs: (n?: number) => Promise<string[]>
   onLog: (cb: (line: string) => void) => void
 
-  // Settings
-  getSettings: () => Promise<any>
-  saveSettings: (patch: any) => Promise<any>
-  setApiKey: (provider: string, key: string) => Promise<void>
-  getApiKeySet: () => Promise<{ provider: string; hasKey: boolean }>
-
-  // System
-  getRam: () => Promise<{ availMB: number } | null>
-
-  // Accessibility
-  getAccessibility: () => Promise<boolean>
-  openAccessibilitySettings: () => Promise<void>
-
-  // External links
+  // ─── EXTERNAL LINKS ──────────────────────────────────────────────────────────
   openExternal: (url: string) => Promise<void>
 
-  // Auth
-  authGetUser: () => Promise<any>
-  authLoginGoogle: () => Promise<{ ok: boolean; user?: any; error?: string }>
-  authLogout: () => Promise<{ ok: boolean }>
-  authSyncNow: () => Promise<{ ok: boolean; error?: string }>
-  onAuthChanged: (cb: (user: any) => void) => void
-  removeAuthChanged: () => void
+  // ─── PING ─────────────────────────────────────────────────────────────────────
+  ping: () => Promise<void>
 }
 
 declare global {
   interface Window {
-    api: VibeTalkAPI
+    api: OndeFlowAPI
   }
 }
