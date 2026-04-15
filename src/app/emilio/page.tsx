@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import ChatPanel from './components/ChatPanel';
 import SpeechBubble from './components/SpeechBubble';
+import InnerThoughts from './components/InnerThoughts';
 import { useOceanAudio } from './hooks/useOceanAudio';
 import { useVoiceInput } from './hooks/useVoiceInput';
 
@@ -32,9 +33,11 @@ export default function EmilioPage() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isTTSPlaying, setIsTTSPlaying] = useState(false);
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [ondeFlowMode, setOndeFlowMode] = useState<OndeFlowMode>('IDLE');
   const [lastEmotion, setLastEmotion] = useState('excited');
+  const [innerThought, setInnerThought] = useState<string | undefined>(undefined);
 
   const [currentBackend, setCurrentBackend] = useState<EmilioBackend>('sonnet');
   const [isSwitchingBackend, setIsSwitchingBackend] = useState(false);
@@ -56,7 +59,7 @@ export default function EmilioPage() {
 
   const { isListening, interimText, isRecording: isVoiceRecording, isProcessing: isVoiceProcessing, startListening, stopListening } = useVoiceInput(
     (text) => { void sendToEmilio(text) },
-    { paused: isLoading }
+    { paused: isLoading || isTTSPlaying }
   );
 
   const speakFallback = (text: string): Promise<void> => {
@@ -98,11 +101,13 @@ export default function EmilioPage() {
       source.connect(audioCtx.destination)
       currentAudioRef.current = source;
       currentAudioCtxRef.current = audioCtx;
+      setIsTTSPlaying(true);
       await new Promise<void>((resolve) => {
-        source.onended = () => { audioCtx.close(); currentAudioRef.current = null; resolve(); }
+        source.onended = () => { setIsTTSPlaying(false); audioCtx.close(); currentAudioRef.current = null; resolve(); }
         source.start()
       })
     } catch {
+      setIsTTSPlaying(false);
       await speakFallback(text);
     }
   }
@@ -182,6 +187,7 @@ export default function EmilioPage() {
         const emilioReply: string = data.reply || '...';
         setMessages(prev => [...prev, { role: 'shopkeeper', content: emilioReply, emotion: data.emotion }]);
         setLastEmotion(data.emotion || 'neutral');
+        setInnerThought(data.innerThought || undefined);
         void playTTS(emilioReply);
         if (data.action === 'start_coder' && data.coderPayload) {
           await fetch('/api/onde-flow/state', {
@@ -203,6 +209,15 @@ export default function EmilioPage() {
 
   function stopGPTest() { gpAbortRef.current = true; stopCurrentAudio(); }
 
+  const handleVoiceToggle = async () => {
+    if (isTTSPlaying) {
+      stopCurrentAudio();
+      setIsTTSPlaying(false);
+    }
+    if (isListening) stopListening();
+    else await startListening();
+  };
+
   const sendToEmilio = async (userMsg: string) => {
     if (!userMsg.trim() || isLoading) return;
     setMessages(prev => [...prev, { role:'user', content:userMsg }]);
@@ -218,6 +233,7 @@ export default function EmilioPage() {
       const emilioReply: string = data.reply || '...';
       setMessages(prev => [...prev, { role:'shopkeeper', content:emilioReply, emotion:data.emotion }]);
       setLastEmotion(data.emotion || 'neutral');
+      setInnerThought(data.innerThought || undefined);
       void playTTS(emilioReply);
       if (data.action === 'start_coder' && data.coderPayload) {
         await fetch('/api/onde-flow/state', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ startCoder: data.coderPayload }) });
@@ -341,8 +357,8 @@ export default function EmilioPage() {
             {/* Card 1: Talk to Emilio — cyan */}
             <button
               onClick={() => {
-                setStartMode('user')     // navigate immediately
-                void startListening()    // mic request — user gesture still valid
+                setStartMode('user')
+                void handleVoiceToggle()
               }}
               className="boot-card-cyan"
               style={{
@@ -396,6 +412,7 @@ export default function EmilioPage() {
     <main style={{ display:'flex', width:'100%', height:'100vh', overflow:'hidden', background:'#02020c' }}>
       <div style={{ position:'relative', width:'60%', height:'100%' }}>
         <OceanCanvas emotion={lastEmotion} />
+        <InnerThoughts thought={innerThought} />
         <SpeechBubble
           message={messages[messages.length-1]?.role==='shopkeeper' ? messages[messages.length-1].content : ''}
           emotion={lastEmotion}
@@ -432,7 +449,7 @@ export default function EmilioPage() {
         onStopGP={stopGPTest}
         isVoiceRecording={isVoiceRecording}
         isVoiceProcessing={isVoiceProcessing}
-        onToggleVoice={() => isListening ? stopListening() : startListening()}
+        onToggleVoice={() => void handleVoiceToggle()}
         isListening={isListening}
         interimText={interimText}
       />

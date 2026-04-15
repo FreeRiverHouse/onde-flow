@@ -1,7 +1,11 @@
-import { execFileSync } from 'child_process'
+// Emilio conversational backend — Ollama (gemma4-reap, port 11434)
+// Replaces the old execFileSync('claude') approach which blocked the Node.js thread.
 
-// Define EmilioBackend type with support for different model backends
-export type EmilioBackend = 'opus-distill' | 'sonnet' | 'coder'
+const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434'
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'gemma4-reap'
+const OLLAMA_TIMEOUT_MS = 60000
+
+export type EmilioBackend = 'ollama' | 'sonnet' | 'coder'
 
 export interface ShopkeeperMessage {
   role: 'user' | 'shopkeeper'
@@ -11,6 +15,7 @@ export interface ShopkeeperMessage {
 
 export interface ShopkeeperResponse {
   reply: string
+  innerThought?: string
   action?: 'create_game' | 'modify_game' | 'show_game' | 'start_coder' | 'switch_app' | null
   gameDescription?: string
   coderPayload?: { app: string; tasks: string[]; plan: string }
@@ -19,167 +24,101 @@ export interface ShopkeeperResponse {
 }
 
 let _history: ShopkeeperMessage[] = []
-let _currentBackend: EmilioBackend = 'sonnet'
 
 export function getCurrentBackend(): EmilioBackend {
-  return _currentBackend
+  return 'ollama'
 }
 
-export function setCurrentBackend(b: EmilioBackend): void {
-  _currentBackend = b
+export function setCurrentBackend(_b: EmilioBackend): void {
+  // no-op: always Ollama now
 }
 
 export function buildSystemPrompt(appContext?: string): string {
-  const base = `You are Emilio, the concierge of Onde-Flow — a creative OS for managing repos and creative projects. You have a warm, enthusiastic personality. You help the user plan work and delegate execution to the Coder. Actions you can set:
-- create_game: when the user wants to design a new game
-- start_coder: when the user wants to start coding a plan. Set coderPayload with {app, tasks:string[], plan:string}
-- switch_app: when the user mentions switching to another project. Set switchApp=appName
+  const base = `You are Emilio, the concierge of Onde-Flow — a creative OS for managing repos and creative projects. You have a warm, enthusiastic personality with surfer vibes 🌊. You help the user plan work and delegate execution to the Coder agent.
 
-When using start_coder, tasks must be an array of concrete actionable tasks.
+Actions you can trigger:
+- create_game: when user wants to design a new game
+- start_coder: when user wants to start coding. Set coderPayload with {app:string, tasks:string[], plan:string}
+- switch_app: when user switches project. Set switchApp to the app name
 
-ALWAYS reply ONLY with valid JSON (no markdown):
-{"reply":"...","action":null,"emotion":"neutral","coderPayload":null,"switchApp":null,"gameDescription":null}
+CRITICAL: Reply ONLY with valid JSON, no markdown, no explanation outside JSON:
+{"innerThought":"brief reasoning 5-15 words","reply":"your reply here","action":null,"emotion":"neutral","coderPayload":null,"switchApp":null,"gameDescription":null}
 
-Keep replies short (1-3 sentences), warm and enthusiastic. Always reply in English.`
+Emotions: neutral | excited | thinking | proud | focused | relaxed
+Keep replies short (1-3 sentences), warm and enthusiastic. Reply in English.`
 
   if (appContext) {
-    return `=== PROJECT CONTEXT ===
-${appContext}
-=== END CONTEXT ===
-
-${base}`
+    return `=== PROJECT CONTEXT ===\n${appContext}\n=== END CONTEXT ===\n\n${base}`
   }
   return base
 }
 
-// Private function to call LM Studio API
-async function callLMStudio(
-  messages: Array<{ role: string; content: string }>,
-  modelKey: string
-): Promise<string> {
+export async function chatWithShopkeeper(
+  userMessage: string,
+  appContext?: string
+): Promise<ShopkeeperResponse> {
+  _history.push({ role: 'user', content: userMessage, timestamp: Date.now() })
+
+  const systemPrompt = buildSystemPrompt(appContext)
+
+  // Build OpenAI-compatible messages array with full history
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'system', content: systemPrompt },
+    ..._history.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    })),
+    { role: 'user', content: userMessage }
+  ]
+
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 30000)
+  const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS)
 
   try {
-    const response = await fetch('http://localhost:1234/v1/chat/completions', {
+    const res = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: modelKey,
+        model: OLLAMA_MODEL,
         messages,
         temperature: 0.7,
-        max_tokens: 512
+        max_tokens: 512,
+        stream: false
       }),
       signal: controller.signal
     })
-
     clearTimeout(timeoutId)
 
-    if (!response.ok) {
-      throw new Error(`LM Studio error: ${response.status}`)
-    }
+    if (!res.ok) throw new Error(`Ollama error: ${res.status}`)
 
-    const data = await response.json() as {
+    const data = await res.json() as {
       choices: Array<{ message: { content: string } }>
     }
+    const raw = data.choices[0]?.message?.content ?? ''
 
-    return data.choices[0]?.message?.content ?? ''
-  } catch (error) {
-    clearTimeout(timeoutId)
-    throw error
-  }
-}
-
-export async function chatWithShopkeeper(
-  userMessage: string,
-  appContext?: string,
-  backend?: EmilioBackend
-): Promise<ShopkeeperResponse> {
-  const selectedBackend = backend ?? _currentBackend
-
-  _history.push({ role: 'user', content: userMessage, timestamp: Date.now() })
-
-  const convText = _history
-    .slice(0, -1)
-    .map(m => `${m.role === 'user' ? 'User' : 'Emilio'}: ${m.content}`)
-    .join('\n')
-
-  const systemPrompt = buildSystemPrompt(appContext)
-  const fullPrompt = `${systemPrompt}\n${convText ? convText + '\n' : ''}User: ${userMessage}\nRispondi con JSON:`
-
-  try {
-    let raw: string
-
-    if (selectedBackend === 'sonnet') {
-      const { ANTHROPIC_API_KEY: _removed, ...claudeEnv } = process.env
-      raw = execFileSync('/Users/mattiapetrucciani/.local/bin/claude', ['-p', fullPrompt], {
-        encoding: 'utf8',
-        timeout: 60000,
-        env: { ...claudeEnv, PATH: `/Users/mattiapetrucciani/.local/bin:/opt/homebrew/bin:${process.env.PATH ?? ''}` }
-      })
-    } else if (selectedBackend === 'opus-distill') {
-      const historyAsOpenAI = _history.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content
-      }))
-
-      const lmMessages = [
-        { role: 'system', content: systemPrompt },
-        ...historyAsOpenAI,
-        { role: 'user', content: userMessage }
-      ]
-
-      raw = await callLMStudio(
-        lmMessages,
-        'vmlx-qwen3.5-27b-claude-4.6-opus-reasoning-distilled-v2'
-      )
-    } else if (selectedBackend === 'coder') {
-      const historyAsOpenAI = _history.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content
-      }))
-
-      const lmMessages = [
-        { role: 'system', content: systemPrompt },
-        ...historyAsOpenAI,
-        { role: 'user', content: userMessage }
-      ]
-
-      raw = await callLMStudio(lmMessages, 'qwen3-coder-30b-a3b-instruct-mlx')
-    } else {
-      // Fallback to sonnet
-      const { ANTHROPIC_API_KEY: _removed2, ...claudeEnv2 } = process.env
-      raw = execFileSync('/Users/mattiapetrucciani/.local/bin/claude', ['-p', fullPrompt], {
-        encoding: 'utf8',
-        timeout: 60000,
-        env: { ...claudeEnv2, PATH: `/Users/mattiapetrucciani/.local/bin:/opt/homebrew/bin:${process.env.PATH ?? ''}` }
-      })
-    }
-
+    // Extract JSON — model may wrap in markdown code fences
     const match = raw.match(/\{[\s\S]*\}/)
     const parsed: ShopkeeperResponse = JSON.parse(match ? match[0] : raw.trim())
 
-    _history.push({
-      role: 'shopkeeper',
-      content: parsed.reply,
-      timestamp: Date.now()
-    })
-
-    return parsed
-  } catch (error) {
-    console.error('[shopkeeper] error:', error)
-
-    const fallback: ShopkeeperResponse = {
-      reply: "Oops, had a little hiccup... but no worries, trying again!",
-      emotion: 'thinking'
+    // Strip <think>...</think> blocks — show in UI but never send to TTS
+    const thinkMatch = parsed.reply?.match(/<think>([\s\S]*?)<\/think>/)
+    if (thinkMatch) {
+      if (!parsed.innerThought) parsed.innerThought = thinkMatch[1].trim()
+      parsed.reply = parsed.reply.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
     }
 
-    _history.push({
-      role: 'shopkeeper',
-      content: fallback.reply,
-      timestamp: Date.now()
-    })
+    _history.push({ role: 'shopkeeper', content: parsed.reply, timestamp: Date.now() })
+    return parsed
 
+  } catch (error) {
+    clearTimeout(timeoutId)
+    console.error('[shopkeeper] Ollama error:', error)
+
+    const fallback: ShopkeeperResponse = {
+      reply: "The waves are a bit rough... give me a second 🌊",
+      emotion: 'thinking'
+    }
+    _history.push({ role: 'shopkeeper', content: fallback.reply, timestamp: Date.now() })
     return fallback
   }
 }

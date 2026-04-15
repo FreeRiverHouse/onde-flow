@@ -54,6 +54,12 @@ const api = {
 
   // ─── PING ─────────────────────────────────────────────────────────────────────
   ping: () => ipcRenderer.invoke("ping"),
+
+  // ─── PET MODE ────────────────────────────────────────────────────────────────
+  togglePetMode: () => ipcRenderer.invoke("toggle-pet-mode"),
+  onPetModeChanged: (cb: (isPetMode: boolean) => void) => {
+    ipcRenderer.on("pet-mode-changed", (_e, v) => cb(v))
+  },
 }
 
 if (process.contextIsolated) {

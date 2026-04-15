@@ -32,7 +32,7 @@ function encodeWAV(audioBuffer: AudioBuffer): ArrayBuffer {
   return buffer
 }
 
-export function useVoiceInput(onTranscript: (text: string) => void, _options?: { paused?: boolean }) {
+export function useVoiceInput(onTranscript: (text: string) => void, options?: { paused?: boolean }) {
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -40,7 +40,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
   const streamRef = useRef<MediaStream | null>(null)
 
   const startListening = useCallback(async () => {
-    if (isRecording || isProcessing) return
+    if (options?.paused || isRecording || isProcessing) return
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
@@ -87,7 +87,7 @@ export function useVoiceInput(onTranscript: (text: string) => void, _options?: {
     } catch (e) {
       console.error('[voice] mic access failed:', e)
     }
-  }, [isRecording, isProcessing, onTranscript])
+  }, [isRecording, isProcessing, onTranscript, options?.paused])
 
   const stopListening = useCallback(() => {
     if (mediaRecorderRef.current?.state === 'recording') {
