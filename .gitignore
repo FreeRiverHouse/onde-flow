@@ -9,3 +9,5 @@ node_modules/
 electron/out/
 electron/node_modules/
 electron/dist/
+# TypeScript build cache — generated
+tsconfig.tsbuildinfo
